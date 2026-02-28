@@ -30,6 +30,7 @@ import urllib.parse
 from collections import deque, Counter
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
+from typing import Dict, List, Tuple
 
 try:
     from deepface import DeepFace
@@ -37,6 +38,20 @@ try:
 except Exception as import_error:
     DeepFace = None
     DEEPFACE_IMPORT_ERROR = import_error
+
+try:
+    from copilot_analyzer import get_analyzer
+    COPILOT_AVAILABLE = True
+except ImportError:
+    COPILOT_AVAILABLE = False
+    logging.warning("Copilot analyzer not available - install httpx")
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - [TRACKER] - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 FACE_DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "face_db")
@@ -134,6 +149,8 @@ class APIHandler(BaseHTTPRequestHandler):
             self._send_json(json.dumps({
                 "status":     "online",
                 "identities": len(REFERENCE_DATA),
+                "copilot_enabled": activity_analysis_enabled,
+                "suspicious_activities": len(suspicious_activities_log),
                 "timestamp":  time.time(),
             }))
 
@@ -361,6 +378,54 @@ def identify_face(face_crop):
     except Exception:
         return "UNKNOWN"
 
+async def analyze_unknown_activity(face_id: str, face_crop, coordinates: Dict, frame_timestamp: float):
+    """
+    Analyze suspicious activity for unknown face using Copilot.
+    Runs asynchronously to avoid blocking video processing.
+    """
+    if not activity_analysis_enabled or not copilot_analyzer:
+        return
+    
+    try:
+        # Encode face crop to JPEG bytes
+        ret, jpeg_bytes = cv2.imencode('.jpg', face_crop)
+        if not ret:
+            return
+        
+        # Call Copilot analyzer
+        analysis = await copilot_analyzer.analyze_activity_async(
+            jpeg_bytes.tobytes(),
+            face_id,
+            "UNKNOWN",
+            coordinates,
+            frame_timestamp
+        )
+        
+        # Log if suspicious
+        if analysis.get('is_suspicious', False):
+            suspicious_log_entry = {
+                'face_id': face_id,
+                'suspicion_score': analysis['suspicion_score'],
+                'risk_level': analysis.get('risk_level', 'UNKNOWN'),
+                'activities': analysis.get('activities', []),
+                'reasoning': analysis.get('reasoning', ''),
+                'timestamp': frame_timestamp,
+                'time_str': time.strftime("%H:%M:%S", time.localtime(frame_timestamp))
+            }
+            
+            with state_lock:
+                suspicious_activities_log.append(suspicious_log_entry)
+            
+            logger.warning(
+                f"SUSPICIOUS ACTIVITY DETECTED: {face_id} "
+                f"(Score: {analysis['suspicion_score']:.2f}, Risk: {analysis.get('risk_level')})"
+            )
+        else:
+            logger.info(f"Activity analysis for {face_id}: Not suspicious (Score: {analysis['suspicion_score']:.2f})")
+            
+    except Exception as e:
+        logger.error(f"Error analyzing activity for {face_id}: {e}")
+
 def face_worker(task_queue, result_queue):
     while True:
         face_id, face_crop = task_queue.get()
@@ -434,6 +499,17 @@ def main():
         print(f"Error: DeepFace failed to import.\nDetails: {DEEPFACE_IMPORT_ERROR}\nFix: pip install tf-keras deepface")
         return
 
+    # Initialize Copilot analyzer if enabled
+    if activity_analysis_enabled:
+        try:
+            copilot_analyzer = get_analyzer(COPILOT_API_KEY, COPILOT_MODEL)
+            logger.info("Copilot activity analyzer initialized successfully")
+            print("✓ Copilot activity detection ENABLED")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Copilot analyzer: {e}")
+            activity_analysis_enabled = False
+            print("✗ Copilot activity detection DISABLED")
+
     precompute_db()
 
     # Start HTTP API
@@ -455,7 +531,8 @@ def main():
     tracker = FaceTracker()
     task_queue = queue.Queue(maxsize=MAX_WORKERS)
     result_queue = queue.Queue()
-    active_processing = set() 
+    active_processing = set()
+    activity_processing = set()  # Track faces being analyzed for activity
 
     for _ in range(MAX_WORKERS):
         t = threading.Thread(target=face_worker, args=(task_queue, result_queue), daemon=True)
@@ -509,8 +586,40 @@ def main():
                         task_queue.put_nowait((face_id, face_crop.copy()))
                         active_processing.add(face_id)
                         tracked_people[face_id]["last_verified"] = frame_count
+                        
+                        # Store crop for activity analysis if unknown
+                        if data["name"] == "UNKNOWN" or (activity_analysis_enabled and face_id not in activity_processing):
+                            unknown_face_crops[face_id] = face_crop.copy()
                     except queue.Full:
                         pass
+            
+            # Trigger Copilot activity analysis for unknown faces
+            if (activity_analysis_enabled and 
+                face_id not in activity_processing and 
+                data["name"] == "UNKNOWN" and 
+                face_id in unknown_face_crops):
+                
+                try:
+                    x, y, w, h = data["box"]
+                    cx, cy = int(x + w/2), int(y + h/2)
+                    coords = {"x": int(x), "y": int(y), "w": int(w), "h": int(h), "center_x": cx, "center_y": cy}
+                    
+                    # Run async activity analysis
+                    face_crop = unknown_face_crops[face_id]
+                    asyncio.create_task(
+                        analyze_unknown_activity(face_id, face_crop, coords, time.time())
+                    )
+                    activity_processing.add(face_id)
+                    
+                    # Clean up old crops
+                    if len(unknown_face_crops) > 100:
+                        oldest_id = list(unknown_face_crops.keys())[0]
+                        del unknown_face_crops[oldest_id]
+                        if oldest_id in activity_processing:
+                            activity_processing.discard(oldest_id)
+                            
+                except Exception as e:
+                    logger.error(f"Error triggering activity analysis: {e}")
 
         # 5. Build JSON format & UI Annotations
         k_list, u_list = [], []
@@ -562,6 +671,12 @@ def main():
 
     cap.release()
     cv2.destroyAllWindows()
+    
+    # Cleanup Copilot analyzer
+    if copilot_analyzer:
+        copilot_analyzer.close()
+        logger.info("Copilot analyzer closed")
+    
     print("Stopped.")
 
 if __name__ == "__main__":

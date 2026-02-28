@@ -283,7 +283,33 @@ app.get('/health', (req, res) => {
   proxyJSON('/health', res, {
     status:     'offline',
     identities: 0,
+    copilot_enabled: false,
+    suspicious_activities: 0,
     _offline:   true,
+  })
+})
+
+// ── GET /suspicious-activities  — suspicious activities log ──────────────────
+app.get('/suspicious-activities', (req, res) => {
+  proxyJSON('/suspicious-activities', res, {
+    activities: [],
+    total_count: 0,
+    timestamp: Date.now() / 1000,
+    _offline: true,
+  })
+})
+
+// ── GET /activity-summary/:faceId  — activity summary for specific face ──────
+app.get('/activity-summary/:faceId', (req, res) => {
+  const faceId = req.params.faceId
+  proxyJSON(`/activity-summary/${faceId}`, res, {
+    face_id: faceId,
+    total_detections: 0,
+    suspicious_count: 0,
+    avg_suspicion: 0.0,
+    max_suspicion: 0.0,
+    risk_trend: 'UNKNOWN',
+    _offline: true,
   })
 })
 
