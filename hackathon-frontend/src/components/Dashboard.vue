@@ -1,36 +1,73 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { Menu, X } from 'lucide-vue-next'
+import { useSurveillanceAPI } from '../composables/useSurveillanceAPI'
+
+const { data, lastUpdate, getStreamUrl, startPolling, stopPolling } = useSurveillanceAPI()
 
 const activeTab = ref('live')
-const currentPage = ref('dashboard') // 'dashboard' or 'logs'
+const currentPage = ref('dashboard')
 const sidebarOpen = ref(true)
+const currentTime = ref(new Date())
+const systemOnline = computed(() => !data.value._offline)
 
-const people = ref([
-  { id: 1, name: 'Alice Johnson', status: 'Authorized', time: '10:42 AM' },
-  { id: 2, name: 'Bob Smith', status: 'Pending', time: '10:45 AM' },
-  { id: 3, name: 'Charlie Brown', status: 'Denied', time: '10:48 AM' },
-  { id: 4, name: 'Diana Prince', status: 'Authorized', time: '10:50 AM' },
-  { id: 5, name: 'Evan Wright', status: 'Authorized', time: '10:55 AM' },
-])
-
-const detectedPeople = ref([
-  { id: 101, name: 'Alice Johnson', type: 'known', match: '98%' },
-  { id: 102, name: 'Unknown', type: 'unknown', match: '-' },
-  { id: 103, name: 'Evan Wright', type: 'known', match: '92%' },
-])
+// Update clock
+const updateClock = () => {
+  currentTime.value = new Date()
+}
 
 const toggleSidebar = () => {
   sidebarOpen.value = !sidebarOpen.value
   localStorage.setItem('sidebarOpen', sidebarOpen.value)
 }
 
+// Separate known faces from scanning
+const knownFaces = computed(() => {
+  return (data.value.known || []).filter(p => p.name !== 'SCANNING...')
+})
+
+const scanningFaces = computed(() => {
+  return (data.value.known || []).filter(p => p.name === 'SCANNING...')
+})
+
+const unknownFaces = computed(() => {
+  return data.value.unknown || []
+})
+
+const recentAlerts = computed(() => {
+  return (data.value.alerts || []).slice().reverse().slice(0, 50)
+})
+
+const getAlertType = (alert) => {
+  return alert.type === 'KNOWN' ? 'known' : 'unknown'
+}
+
+const formatCoord = (value) => {
+  return value ? `${value}px` : '-'
+}
+
+const formatTime = (timestamp) => {
+  if (!timestamp) return '--:--:--'
+  const date = new Date(timestamp * 1000)
+  return date.toLocaleTimeString('en-US', { hour12: false })
+}
+
 onMounted(() => {
-  // Load sidebar state from localStorage
   const savedState = localStorage.getItem('sidebarOpen')
   if (savedState !== null) {
     sidebarOpen.value = savedState === 'true'
   }
+  
+  // Start polling for data
+  startPolling(250)
+  
+  // Update clock
+  const clockInterval = setInterval(updateClock, 1000)
+  
+  onUnmounted(() => {
+    clearInterval(clockInterval)
+    stopPolling()
+  })
 })
 </script>
 
@@ -39,17 +76,16 @@ onMounted(() => {
     <!-- Sidebar -->
     <aside class="sidebar" :class="{ 'sidebar-collapsed': !sidebarOpen }">
       <div class="logo">
-        <h2>SecureView</h2>
+        <h2>NEXUS</h2>
+        <p class="subtitle">Surveillance Intelligence</p>
       </div>
       <nav>
         <ul>
           <li :class="{ active: currentPage === 'dashboard' }" @click="currentPage = 'dashboard'">Dashboard</li>
-          <li>Live Feed</li>
-          <li :class="{ active: currentPage === 'logs' }" @click="currentPage = 'logs'">Recent Access Logs</li>
+          <li :class="{ active: currentPage === 'logs' }" @click="currentPage = 'logs'">Detection Log</li>
           <li>Settings</li>
         </ul>
       </nav>
-      <!-- Toggle Button at Bottom -->
       <button 
         class="sidebar-toggle-btn"
         @click="toggleSidebar"
@@ -65,271 +101,340 @@ onMounted(() => {
     <main class="main-content">
       <!-- Header -->
       <header class="top-bar">
-        <h1>{{ currentPage === 'dashboard' ? 'Dashboard Overview' : 'Recent Access Logs' }}</h1>
-        <button class="login-btn">Login</button>
+        <div class="header-left">
+          <h1>SURVEILLANCE INTELLIGENCE v2.1</h1>
+        </div>
+        <div class="header-right">
+          <div class="sysline">
+            <div class="dot" :class="systemOnline ? 'dot-g' : 'dot-r'"></div>
+            <span>{{ systemOnline ? 'SYSTEM ONLINE' : 'RECOGNITION OFFLINE' }}</span>
+          </div>
+          <div class="clock">{{ currentTime.toLocaleTimeString('en-US', { hour12: false }) }}</div>
+        </div>
       </header>
 
-      <!-- Dashboard View -->
-      <template v-if="currentPage === 'dashboard'">
-        <!-- Tabs for Live Feed and Detected People -->
-        <div class="main-tabs">
-          <button 
-            :class="['main-tab-btn', { active: activeTab === 'live' }]" 
-            @click="activeTab = 'live'"
-          >
-            Live Feed
-          </button>
-          <button 
-            :class="['main-tab-btn', { active: activeTab === 'detected' }]" 
-            @click="activeTab = 'detected'"
-          >
-            Detected People
-          </button>
+      <!-- Stats Bar -->
+      <div class="stats-bar">
+        <div class="stat-card">
+          <div class="stat-icon">👁</div>
+          <div class="stat-info">
+            <div class="stat-label">Detected</div>
+            <div class="stat-value">{{ data.counts?.total ?? 0 }}</div>
+          </div>
         </div>
+        <div class="stat-card">
+          <div class="stat-icon">✅</div>
+          <div class="stat-info">
+            <div class="stat-label">Identified</div>
+            <div class="stat-value green">{{ data.counts?.known ?? 0 }}</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">⚠️</div>
+          <div class="stat-info">
+            <div class="stat-label">Unknown</div>
+            <div class="stat-value red">{{ data.counts?.unknown ?? 0 }}</div>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon">🕐</div>
+          <div class="stat-info">
+            <div class="stat-label">Last Update</div>
+            <div class="stat-value yellow">{{ formatTime(data.timestamp) }}</div>
+          </div>
+        </div>
+      </div>
 
-        <!-- Dashboard Grid -->
-        <div class="dashboard-grid">
-          <!-- Live Feed Section -->
-          <div v-if="activeTab === 'live'" class="card camera-card full-width">
-            <div class="card-header">
-              <span class="live-indicator">● LIVE</span>
-            </div>
-            <div class="video-placeholder">
-              <div class="camera-overlay">
-                <p>Camera 01 - Main Entrance</p>
-              </div>
-              <!-- Placeholder for video stream -->
-              <div class="placeholder-content">
-                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
-                <p>Video Feed Unavailable in Prototype</p>
+      <!-- Main Content Grid -->
+      <div class="content-grid">
+        <!-- Left: Video Section -->
+        <div class="left-panel">
+          <!-- Tabs -->
+          <div class="main-tabs">
+            <button 
+              :class="['main-tab-btn', { active: activeTab === 'live' }]" 
+              @click="activeTab = 'live'"
+            >
+              Live Feed
+            </button>
+            <button 
+              :class="['main-tab-btn', { active: activeTab === 'detected' }]" 
+              @click="activeTab = 'detected'"
+            >
+              Detection Details
+            </button>
+          </div>
+
+          <!-- Live Feed Tab -->
+          <div v-if="activeTab === 'live'" class="card camera-card">
+            <div class="video-container">
+              <img 
+                :src="getStreamUrl()" 
+                alt="Live Feed" 
+                class="live-stream"
+              >
+              <div class="corner corner-tl"></div>
+              <div class="corner corner-tr"></div>
+              <div class="corner corner-bl"></div>
+              <div class="corner corner-br"></div>
+              <div class="live-badge">● REC LIVE</div>
+              <div class="video-info">
+                CAM-01 // FACES: {{ data.counts?.total ?? 0 }} // {{ currentTime.toLocaleTimeString('en-US', { hour12: false }) }}
               </div>
             </div>
           </div>
 
-          <!-- Detected People Section -->
-          <div v-if="activeTab === 'detected'" class="card detected-card full-width">
-            <div class="card-header">
-              <h3>Detected People</h3>
-            </div>
-            <div class="detected-container">
-              <div v-for="person in detectedPeople" :key="person.id" class="detected-item">
-                <div class="person-info">
-                  <span class="person-name">{{ person.name }}</span>
-                  <span :class="['match-badge', person.type]">{{ person.type === 'known' ? 'Match: ' + person.match : 'Unknown' }}</span>
+          <!-- Detection Details Tab -->
+          <div v-if="activeTab === 'detected'" class="card detection-card">
+            <div class="detection-content">
+              <!-- Known Faces -->
+              <div v-if="knownFaces.length > 0 || scanningFaces.length > 0" class="detection-section">
+                <h3 class="section-title known-title">IDENTIFIED PERSONS</h3>
+                <div class="faces-list">
+                  <div v-for="face in knownFaces" :key="`known-${face.id}`" class="face-item known">
+                    <div class="face-header">
+                      <span class="face-name">{{ face.name }}</span>
+                      <span class="badge badge-known">CLEARED</span>
+                    </div>
+                    <div class="face-grid">
+                      <div class="grid-item">
+                        <span class="grid-key">X</span>
+                        <span class="grid-val">{{ formatCoord(face.coords?.x) }}</span>
+                      </div>
+                      <div class="grid-item">
+                        <span class="grid-key">Y</span>
+                        <span class="grid-val">{{ formatCoord(face.coords?.y) }}</span>
+                      </div>
+                      <div class="grid-item">
+                        <span class="grid-key">W</span>
+                        <span class="grid-val">{{ formatCoord(face.coords?.w) }}</span>
+                      </div>
+                      <div class="grid-item">
+                        <span class="grid-key">H</span>
+                        <span class="grid-val">{{ formatCoord(face.coords?.h) }}</span>
+                      </div>
+                      <div class="grid-item">
+                        <span class="grid-key">CX</span>
+                        <span class="grid-val">{{ formatCoord(face.coords?.center_x) }}</span>
+                      </div>
+                      <div class="grid-item">
+                        <span class="grid-key">CY</span>
+                        <span class="grid-val">{{ formatCoord(face.coords?.center_y) }}</span>
+                      </div>
+                    </div>
+                  </div>
+                  <div v-for="face in scanningFaces" :key="`scan-${face.id}`" class="face-item scanning">
+                    <div class="face-header">
+                      <span class="face-name">ANALYZING...</span>
+                      <span class="badge badge-scanning">SCANNING</span>
+                    </div>
+                    <div class="face-grid">
+                      <div class="grid-item">
+                        <span class="grid-key">X</span>
+                        <span class="grid-val">{{ formatCoord(face.coords?.x) }}</span>
+                      </div>
+                      <div class="grid-item">
+                        <span class="grid-key">Y</span>
+                        <span class="grid-val">{{ formatCoord(face.coords?.y) }}</span>
+                      </div>
+                      <div class="grid-item">
+                        <span class="grid-key">W</span>
+                        <span class="grid-val">{{ formatCoord(face.coords?.w) }}</span>
+                      </div>
+                      <div class="grid-item">
+                        <span class="grid-key">H</span>
+                        <span class="grid-val">{{ formatCoord(face.coords?.h) }}</span>
+                      </div>
+                      <div class="grid-item">
+                        <span class="grid-key">CX</span>
+                        <span class="grid-val">{{ formatCoord(face.coords?.center_x) }}</span>
+                      </div>
+                      <div class="grid-item">
+                        <span class="grid-key">CY</span>
+                        <span class="grid-val">{{ formatCoord(face.coords?.center_y) }}</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <button v-if="person.type === 'unknown'" class="add-person-btn">Add Person</button>
+              </div>
+
+              <!-- Unknown Faces -->
+              <div v-if="unknownFaces.length > 0" class="detection-section">
+                <h3 class="section-title unknown-title">UNKNOWN INTRUDERS</h3>
+                <div class="faces-list">
+                  <div v-for="(face, idx) in unknownFaces" :key="`unknown-${idx}`" class="face-item unknown">
+                    <div class="face-header">
+                      <span class="face-name">INTRUDER #{{ idx + 1 }}</span>
+                      <span class="badge badge-unknown">THREAT</span>
+                    </div>
+                    <div class="face-grid">
+                      <div class="grid-item">
+                        <span class="grid-key">X</span>
+                        <span class="grid-val">{{ formatCoord(face.x) }}</span>
+                      </div>
+                      <div class="grid-item">
+                        <span class="grid-key">Y</span>
+                        <span class="grid-val">{{ formatCoord(face.y) }}</span>
+                      </div>
+                      <div class="grid-item">
+                        <span class="grid-key">W</span>
+                        <span class="grid-val">{{ formatCoord(face.w) }}</span>
+                      </div>
+                      <div class="grid-item">
+                        <span class="grid-key">H</span>
+                        <span class="grid-val">{{ formatCoord(face.h) }}</span>
+                      </div>
+                      <div class="grid-item">
+                        <span class="grid-key">CX</span>
+                        <span class="grid-val">{{ formatCoord(face.center_x) }}</span>
+                      </div>
+                      <div class="grid-item">
+                        <span class="grid-key">CY</span>
+                        <span class="grid-val">{{ formatCoord(face.center_y) }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Empty State -->
+              <div v-if="knownFaces.length === 0 && scanningFaces.length === 0 && unknownFaces.length === 0" class="empty-state">
+                <p>NO DETECTIONS</p>
               </div>
             </div>
           </div>
         </div>
-      </template>
 
-      <!-- Recent Access Logs View -->
-      <template v-if="currentPage === 'logs'">
-        <div class="logs-view">
-          <div class="card logs-card">
-            <div class="card-header">
-              <h3>All Access Logs</h3>
+        <!-- Right: Panels -->
+        <div class="right-panel">
+          <!-- Known Faces Panel -->
+          <div class="side-section">
+            <div class="section-header known-header">
+              <div class="dot dot-g"></div>
+              <span>IDENTIFIED PERSONS</span>
             </div>
-            <div class="table-container">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Status</th>
-                    <th>Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="person in people" :key="person.id">
-                    <td>{{ person.name }}</td>
-                    <td>
-                      <span :class="['status-badge', person.status.toLowerCase()]">
-                        {{ person.status }}
-                      </span>
-                    </td>
-                    <td>{{ person.time }}</td>
-                  </tr>
-                </tbody>
-              </table>
+            <div class="section-body">
+              <div v-if="knownFaces.length === 0 && scanningFaces.length === 0" class="empty-message">
+                NO KNOWN FACES DETECTED
+              </div>
+              <div v-for="face in knownFaces" :key="`panel-known-${face.id}`" class="side-card known">
+                <div class="card-name">{{ face.name }}</div>
+                <div class="card-coords">{{ formatCoord(face.coords?.x) }} / {{ formatCoord(face.coords?.y) }}</div>
+              </div>
+              <div v-for="face in scanningFaces" :key="`panel-scan-${face.id}`" class="side-card scanning">
+                <div class="card-name">ANALYZING...</div>
+                <div class="card-coords">{{ formatCoord(face.coords?.x) }} / {{ formatCoord(face.coords?.y) }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Unknown Faces Panel -->
+          <div class="side-section">
+            <div class="section-header unknown-header">
+              <div class="dot dot-r"></div>
+              <span>UNKNOWN INTRUDERS</span>
+            </div>
+            <div class="section-body">
+              <div v-if="unknownFaces.length === 0" class="empty-message">
+                AREA CLEAR
+              </div>
+              <div v-for="(face, idx) in unknownFaces" :key="`panel-unknown-${idx}`" class="side-card unknown">
+                <div class="card-name">INTRUDER #{{ idx + 1 }}</div>
+                <div class="card-coords">{{ formatCoord(face.x) }} / {{ formatCoord(face.y) }}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Alert Log Panel -->
+          <div class="side-section grow">
+            <div class="section-header alert-header">
+              <div class="dot dot-y"></div>
+              <span>DETECTION LOG</span>
+            </div>
+            <div class="section-body">
+              <div v-if="recentAlerts.length === 0" class="empty-message">
+                AWAITING DETECTIONS...
+              </div>
+              <div v-for="alert in recentAlerts" :key="`alert-${alert.time}-${alert.name}`" class="alert-item" :class="getAlertType(alert)">
+                <span class="alert-time">{{ alert.time }}</span>
+                <span class="alert-type">[{{ alert.type }}]</span>
+                <span class="alert-name">{{ alert.name }}</span>
+              </div>
             </div>
           </div>
         </div>
-      </template>
-
-      <!-- Sidebar Uncollapse Button -->
-      <button 
-        v-if="!sidebarOpen"
-        class="sidebar-uncollapse-btn"
-        @click="toggleSidebar"
-        title="Open sidebar"
-        aria-label="Open sidebar"
-      >
-        <Menu :size="24" />
-      </button>
+      </div>
     </main>
+
+    <!-- Sidebar Uncollapse Button -->
+    <button 
+      v-if="!sidebarOpen"
+      class="sidebar-uncollapse-btn"
+      @click="toggleSidebar"
+      title="Open sidebar"
+      aria-label="Open sidebar"
+    >
+      <Menu :size="24" />
+    </button>
   </div>
 </template>
 
 <style scoped>
-@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Space+Mono:wght@400;700&family=IBM+Plex+Mono:wght@400;600;700&display=swap');
-
-/* CSS Variables for SOC Theme */
 :root {
-  --soc-midnight: #0B0E14;
-  --soc-midnight-light: #161B22;
-  --soc-midnight-lighter: #21262D;
-  --soc-deep-void: #0a0d11;
-  --soc-indigo: #6366F1;
-  --soc-indigo-bright: #818CF8;
-  --soc-indigo-dark: #4F46E5;
-  --soc-indigo-ultra: #7C3AED;
-  --soc-neon-red: #FF3131;
-  --soc-neon-red-alt: #FF1744;
-  --soc-red-glow: rgba(255, 49, 49, 0.3);
-  --soc-red-glow-strong: rgba(255, 49, 49, 0.5);
-  --soc-cyan: #00D9FF;
-  --soc-cyan-glow: rgba(0, 217, 255, 0.2);
-  --soc-text-primary: #E1E8ED;
-  --soc-text-secondary: #8B95A5;
-  --soc-text-muted: #6B7280;
-  --soc-border: #2D333B;
-  --soc-grid: rgba(99, 102, 241, 0.1);
-  --soc-accent-gold: #FFD700;
+  --bg: #040608;
+  --panel: #07090c;
+  --border: #0e2218;
+  --green: #00ff88;
+  --gd: #00bb60;
+  --red: #ff2244;
+  --rd: #991122;
+  --yellow: #ffcc00;
+  --cyan: #00ccff;
+  --text: #c0d8c0;
+  --dim: #3a5a4a;
+  --glow: 0 0 14px rgba(0, 255, 136, 0.3);
+  --glow-r: 0 0 14px rgba(255, 34, 68, 0.35);
 }
 
-/* Layout */
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
 .dashboard-container {
   display: flex;
   height: 100vh;
-  background: linear-gradient(135deg, var(--soc-deep-void) 0%, var(--soc-midnight) 50%, var(--soc-deep-void) 100%);
-  background-attachment: fixed;
-  color: var(--soc-text-primary);
-  font-family: 'IBM Plex Mono', 'JetBrains Mono', monospace;
-  position: relative;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Rajdhani', 'JetBrains Mono', monospace;
   overflow: hidden;
-}
-
-/* Animated Background Grid */
-.dashboard-container::before {
-  content: '';
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
   background-image: 
-    linear-gradient(0deg, transparent 24%, rgba(99, 102, 241, 0.05) 25%, rgba(99, 102, 241, 0.05) 26%, transparent 27%, transparent 74%, rgba(99, 102, 241, 0.05) 75%, rgba(99, 102, 241, 0.05) 76%, transparent 77%, transparent),
-    linear-gradient(90deg, transparent 24%, rgba(99, 102, 241, 0.05) 25%, rgba(99, 102, 241, 0.05) 26%, transparent 27%, transparent 74%, rgba(99, 102, 241, 0.05) 75%, rgba(99, 102, 241, 0.05) 76%, transparent 77%, transparent);
-  background-size: 50px 50px;
-  pointer-events: none;
-  z-index: 0;
-  animation: grid-shift 20s linear infinite;
+    repeating-linear-gradient(0deg, transparent, transparent 39px, rgba(0, 255, 136, 0.018) 40px),
+    repeating-linear-gradient(90deg, transparent, transparent 39px, rgba(0, 255, 136, 0.018) 40px);
 }
 
-@keyframes grid-shift {
-  0% { transform: translate(0, 0); }
-  100% { transform: translate(50px, 50px); }
-}
-
-/* Radial gradient accent */
+/* Scanlines */
 .dashboard-container::after {
   content: '';
   position: fixed;
-  top: 50%;
-  left: 50%;
-  width: 200%;
-  height: 200%;
-  background: radial-gradient(circle at 30% 50%, rgba(99, 102, 241, 0.08) 0%, transparent 50%),
-              radial-gradient(circle at 70% 30%, rgba(0, 217, 255, 0.05) 0%, transparent 50%);
-  transform: translate(-50%, -50%);
+  inset: 0;
   pointer-events: none;
-  z-index: 0;
-  animation: radial-pulse 15s ease-in-out infinite;
+  z-index: 9999;
+  background: repeating-linear-gradient(to bottom, transparent 0, transparent 2px, rgba(0, 0, 0, 0.06) 2px, rgba(0, 0, 0, 0.06) 4px);
 }
 
-@keyframes radial-pulse {
-  0%, 100% { opacity: 0.5; }
-  50% { opacity: 1; }
-}
-
-/* Sidebar Toggle Button */
-.sidebar-toggle-btn {
-  position: absolute;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(99, 102, 241, 0.05) 100%);
-  border: 1px solid rgba(99, 102, 241, 0.4);
-  color: #818CF8;
-  cursor: pointer;
-  padding: 10px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.3s ease;
-  width: 44px;
-  height: 44px;
-  z-index: 100;
-}
-
-.sidebar-toggle-btn:hover {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3) 0%, rgba(99, 102, 241, 0.15) 100%);
-  border-color: rgba(99, 102, 241, 0.6);
-  color: #E1E8ED;
-  transform: translateX(-50%) scale(1.1);
-}
-
-.sidebar-toggle-btn:active {
-  transform: translateX(-50%) scale(0.95);
-}
-
-/* Sidebar Uncollapse Button */
-.sidebar-uncollapse-btn {
-  position: fixed;
-  bottom: 30px;
-  right: 30px;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(99, 102, 241, 0.05) 100%);
-  border: 1px solid rgba(99, 102, 241, 0.4);
-  color: #818CF8;
-  cursor: pointer;
-  padding: 12px;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.3s ease;
-  width: 50px;
-  height: 50px;
-  z-index: 99;
-}
-
-.sidebar-uncollapse-btn:hover {
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3) 0%, rgba(99, 102, 241, 0.15) 100%);
-  border-color: rgba(99, 102, 241, 0.6);
-  color: #E1E8ED;
-  transform: scale(1.15);
-  box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
-}
-
-.sidebar-uncollapse-btn:active {
-  transform: scale(0.95);
-}
-
-/* Sidebar */
+/* ── SIDEBAR ── */
 .sidebar {
   width: 280px;
-  background: linear-gradient(180deg, var(--soc-midnight-light) 0%, var(--soc-midnight) 100%);
-  color: var(--soc-text-primary);
+  background: linear-gradient(180deg, var(--panel), var(--bg));
+  border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
   overflow-y: auto;
-  border-right: 2px solid var(--soc-indigo);
-  box-shadow: inset -8px 0 32px rgba(99, 102, 241, 0.08), -4px 0 16px rgba(0, 0, 0, 0.5);
+  transition: width 0.3s ease, transform 0.3s ease;
   position: relative;
   z-index: 10;
-  transition: width 0.3s ease, transform 0.3s ease, opacity 0.3s ease;
 }
 
 .sidebar.sidebar-collapsed {
@@ -337,854 +442,722 @@ onMounted(() => {
   transform: translateX(-100%);
   opacity: 0;
   pointer-events: none;
-  overflow: hidden;
-}
-
-/* Sidebar animated accent line */
-.sidebar::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  right: 0;
-  width: 2px;
-  height: 100%;
-  background: linear-gradient(180deg, var(--soc-indigo) 0%, var(--soc-neon-red) 50%, transparent 100%);
-  opacity: 0.3;
-  animation: shimmer-vertical 3s ease-in-out infinite;
-}
-
-@keyframes shimmer-vertical {
-  0%, 100% { opacity: 0.2; }
-  50% { opacity: 0.6; }
 }
 
 .logo {
-  padding: 28px 24px;
-  border-bottom: 2px solid var(--soc-indigo);
-  flex-shrink: 0;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.15) 0%, transparent 100%);
-  position: relative;
-  overflow: hidden;
-}
-
-/* Logo glow background */
-.logo::before {
-  content: '';
-  position: absolute;
-  top: -50%;
-  right: -50%;
-  width: 200%;
-  height: 200%;
-  background: radial-gradient(circle, rgba(99, 102, 241, 0.2) 0%, transparent 70%);
-  animation: rotate-glow 8s linear infinite;
-}
-
-@keyframes rotate-glow {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
+  padding: 20px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, #060d09, var(--panel));
 }
 
 .logo h2 {
-  margin: 0;
+  font-family: 'Share Tech Mono', monospace;
   font-size: 1.4rem;
-  font-weight: 700;
-  color: var(--soc-indigo-bright);
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  text-shadow: 0 0 20px rgba(99, 102, 241, 0.5), 0 0 40px rgba(99, 102, 241, 0.2);
-  position: relative;
-  z-index: 2;
-  animation: logo-glow 2s ease-in-out infinite;
+  color: var(--green);
+  text-shadow: var(--glow);
+  letter-spacing: 5px;
+  margin: 0;
+  line-height: 1;
 }
 
-@keyframes logo-glow {
-  0%, 100% { text-shadow: 0 0 20px rgba(99, 102, 241, 0.5), 0 0 40px rgba(99, 102, 241, 0.2); }
-  50% { text-shadow: 0 0 30px rgba(99, 102, 241, 0.8), 0 0 60px rgba(99, 102, 241, 0.4); }
+.logo .subtitle {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.6rem;
+  letter-spacing: 3px;
+  color: var(--dim);
+  margin-top: 4px;
 }
 
 .sidebar nav ul {
   list-style: none;
   padding: 0;
   margin: 0;
-  flex-shrink: 0;
 }
 
 .sidebar nav li {
-  padding: 16px 24px;
+  padding: 14px 18px;
   cursor: pointer;
-  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-  color: var(--soc-text-secondary);
-  border-left: 4px solid transparent;
-  position: relative;
-  font-size: 0.9rem;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  overflow: hidden;
-}
-
-/* Navigation item hover effect */
-.sidebar nav li::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent 0%, rgba(99, 102, 241, 0.2) 50%, transparent 100%);
-  transition: left 0.6s ease;
-}
-
-.sidebar nav li::after {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 0;
-  height: 2px;
-  background: var(--soc-indigo);
-  transition: width 0.3s ease;
-}
-
-.sidebar nav li:hover::before {
-  left: 100%;
-}
-
-.sidebar nav li:hover::after {
-  width: 100%;
+  transition: all 0.2s;
+  color: var(--dim);
+  border-left: 3px solid transparent;
+  font-size: 0.85rem;
+  letter-spacing: 2px;
 }
 
 .sidebar nav li:hover {
-  background-color: rgba(99, 102, 241, 0.12);
-  color: var(--soc-indigo-bright);
-  border-left-color: var(--soc-indigo);
-  padding-left: 28px;
-  box-shadow: inset 4px 0 12px rgba(99, 102, 241, 0.1);
+  background: rgba(0, 255, 136, 0.1);
+  color: var(--green);
+  border-left-color: var(--green);
 }
 
 .sidebar nav li.active {
-  background: linear-gradient(90deg, rgba(99, 102, 241, 0.2) 0%, transparent 100%);
-  color: var(--soc-indigo-bright);
-  border-left-color: var(--soc-neon-red);
-  box-shadow: inset 0 0 20px rgba(99, 102, 241, 0.08), inset -2px 0 8px rgba(255, 49, 49, 0.1);
-  border-left-width: 4px;
-  position: relative;
+  background: rgba(0, 255, 136, 0.15);
+  color: var(--green);
+  border-left-color: var(--green);
+  box-shadow: inset -2px 0 8px rgba(0, 255, 136, 0.1);
 }
 
-.sidebar nav li.active::after {
-  content: '';
+.sidebar-toggle-btn {
   position: absolute;
-  right: 0;
-  top: 0;
-  bottom: 0;
-  width: 3px;
-  background: var(--soc-neon-red);
-  box-shadow: 0 0 8px var(--soc-neon-red);
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 255, 136, 0.15);
+  border: 1px solid var(--border);
+  color: var(--green);
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  z-index: 100;
 }
 
-/* Main Content */
+.sidebar-toggle-btn:hover {
+  background: rgba(0, 255, 136, 0.25);
+  box-shadow: var(--glow);
+}
+
+.sidebar-uncollapse-btn {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  background: rgba(0, 255, 136, 0.15);
+  border: 1px solid var(--border);
+  color: var(--green);
+  cursor: pointer;
+  padding: 10px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 99;
+  transition: all 0.2s;
+}
+
+.sidebar-uncollapse-btn:hover {
+  background: rgba(0, 255, 136, 0.25);
+  box-shadow: var(--glow);
+}
+
+/* ── MAIN CONTENT ── */
 .main-content {
   flex: 1;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  background: linear-gradient(135deg, var(--soc-midnight) 0%, var(--soc-midnight-light) 100%);
   position: relative;
   z-index: 5;
 }
 
-/* Header */
+/* ── HEADER ── */
 .top-bar {
-  background: linear-gradient(90deg, var(--soc-midnight-light) 0%, var(--soc-midnight-lighter) 100%);
-  padding: 24px 40px;
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6), 0 0 1px var(--soc-indigo);
-  border-bottom: 1px solid var(--soc-indigo);
-  position: relative;
-  overflow: hidden;
+  justify-content: space-between;
+  padding: 10px 22px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, #060d09, var(--bg));
+  height: 52px;
 }
 
-/* Header glow effect */
-.top-bar::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 200%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent 0%, rgba(99, 102, 241, 0.1) 50%, transparent 100%);
-  animation: sweep 6s ease-in-out infinite;
-}
-
-@keyframes sweep {
-  0%, 100% { left: -100%; }
-  50% { left: 100%; }
-}
-
-.top-bar h1 {
+.header-left h1 {
   margin: 0;
-  font-size: 1.6rem;
-  font-weight: 700;
-  color: var(--soc-indigo-bright);
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  text-shadow: 0 0 15px rgba(99, 102, 241, 0.4);
-  position: relative;
-  z-index: 2;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.95rem;
+  color: var(--text);
+  letter-spacing: 2px;
 }
 
-.login-btn {
-  background: linear-gradient(135deg, #a855f7 0%, #9333ea 100%);
-  color: white;
-  border: 2px solid #d8b4fe;
-  padding: 12px 28px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-weight: 700;
-  font-family: 'IBM Plex Mono', 'JetBrains Mono', monospace;
-  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-  box-shadow: 0 0 25px rgba(168, 85, 247, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+}
+
+.sysline {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.7rem;
+  color: var(--dim);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.dot-g {
+  background: var(--green);
+  box-shadow: var(--glow);
+  animation: pulse 2s infinite;
+}
+
+.dot-r {
+  background: var(--red);
+  box-shadow: var(--glow-r);
+}
+
+.dot-y {
+  background: var(--yellow);
+}
+
+.clock {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.85rem;
+  color: var(--green);
+  letter-spacing: 2px;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.8); }
+}
+
+/* ── STATS BAR ── */
+.stats-bar {
+  display: flex;
+  gap: 1px;
+  background: var(--border);
+  border-bottom: 1px solid var(--border);
+}
+
+.stat-card {
+  flex: 1;
+  background: var(--panel);
+  padding: 8px 18px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  transition: background 0.2s;
+  cursor: default;
+}
+
+.stat-card:hover {
+  background: #080f0b;
+}
+
+.stat-icon {
+  font-size: 1.2rem;
+}
+
+.stat-info {
+  display: flex;
+  flex-direction: column;
+}
+
+.stat-label {
+  font-size: 0.58rem;
+  letter-spacing: 2px;
+  color: var(--dim);
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  position: relative;
-  overflow: hidden;
-  z-index: 2;
+}
+
+.stat-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--green);
+  line-height: 1;
+}
+
+.stat-value.red {
+  color: var(--red);
+}
+
+.stat-value.yellow {
+  color: var(--yellow);
   font-size: 0.85rem;
 }
 
-/* Button shine effect */
-.login-btn::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
+/* ── CONTENT GRID ── */
+.content-grid {
+  display: grid;
+  grid-template-columns: 1fr 320px;
+  grid-template-rows: 1fr;
+  gap: 1px;
   height: 100%;
-  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.3) 50%, transparent 100%);
-  transition: left 0.5s ease;
+  overflow: hidden;
+  background: var(--border);
 }
 
-.login-btn:hover::before {
-  left: 100%;
-}
-
-.login-btn:hover {
-  background: linear-gradient(135deg, #c084fc 0%, #a855f7 100%);
-  box-shadow: 0 0 50px rgba(168, 85, 247, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 0 30px rgba(168, 85, 247, 0.8);
-  transform: translateY(-2px);
-}
-
-.login-btn:active {
-  box-shadow: 0 0 30px rgba(168, 85, 247, 0.7), inset 0 2px 4px rgba(0, 0, 0, 0.3);
-  transform: translateY(0);
-}
-
-/* Dashboard Grid */
-.dashboard-grid {
-  padding: 40px;
-  display: flex;
-  gap: 40px;
-  overflow-y: auto;
-  height: 100%;
-  flex: 1;
-  background: radial-gradient(circle at 20% 50%, rgba(99, 102, 241, 0.08) 0%, transparent 50%);
-  perspective: 1000px;
-}
-
-.card {
-  background: linear-gradient(135deg, var(--soc-midnight-light) 0%, var(--soc-midnight-lighter) 100%);
-  border-radius: 8px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), 0 0 30px rgba(99, 102, 241, 0.15);
+.left-panel {
+  background: var(--bg);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--soc-border);
-  position: relative;
-  backdrop-filter: blur(10px);
-  animation: card-appear 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-  opacity: 0;
 }
 
-@keyframes card-appear {
-  0% {
-    opacity: 0;
-    transform: translateY(20px) scale(0.95);
-  }
-  100% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-  }
-}
-
-.card.full-width {
-  width: 100%;
-  flex: 1;
-  animation-delay: 0.2s;
-}
-
-/* Card border glow */
-.card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.1) 0%, transparent 50%, rgba(0, 217, 255, 0.05) 100%);
-  pointer-events: none;
-  border-radius: 8px;
-  opacity: 0;
-  transition: opacity 0.4s ease;
-}
-
-.card:hover::before {
-  opacity: 1;
-}
-
-.card-header {
-  padding: 24px;
-  border-bottom: 1px solid var(--soc-border);
+.right-panel {
+  background: var(--panel);
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: linear-gradient(90deg, rgba(99, 102, 241, 0.08) 0%, transparent 100%);
-  position: relative;
-  z-index: 2;
+  flex-direction: column;
+  overflow: hidden;
+  border-left: 1px solid var(--border);
 }
 
-.card-header h3 {
-  margin: 0;
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: var(--soc-indigo-bright);
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  text-shadow: 0 0 10px rgba(99, 102, 241, 0.3);
-}
-
-/* Main Tabs */
+/* ── TABS ── */
 .main-tabs {
-  padding: 0 40px;
   display: flex;
-  gap: 40px;
-  border-bottom: 2px solid var(--soc-border);
-  background: linear-gradient(90deg, var(--soc-midnight-light) 0%, var(--soc-midnight-lighter) 100%);
-  position: relative;
-}
-
-/* Tab underline animation */
-.main-tabs::after {
-  content: '';
-  position: absolute;
-  bottom: -2px;
-  left: 40px;
-  height: 2px;
-  width: 0;
-  background: linear-gradient(90deg, var(--soc-indigo) 0%, var(--soc-cyan) 100%);
-  transition: all 0.3s ease;
+  gap: 1px;
+  background: var(--border);
+  border-bottom: 1px solid var(--border);
 }
 
 .main-tab-btn {
-  background: none;
+  flex: 1;
+  background: var(--panel);
   border: none;
-  font-size: 1rem;
-  font-weight: 700;
-  color: var(--soc-text-secondary);
+  color: var(--dim);
+  padding: 8px 12px;
   cursor: pointer;
-  padding: 18px 0;
-  border-bottom: 3px solid transparent;
-  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-  font-family: 'IBM Plex Mono', 'JetBrains Mono', monospace;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.6rem;
+  letter-spacing: 2px;
   text-transform: uppercase;
-  letter-spacing: 0.08em;
-  position: relative;
-  overflow: hidden;
-}
-
-.main-tab-btn::before {
-  content: '';
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  width: 100%;
-  height: 3px;
-  background: linear-gradient(90deg, var(--soc-indigo) 0%, var(--soc-cyan) 100%);
-  transform: scaleX(0);
-  transform-origin: right;
-  transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: all 0.15s;
 }
 
 .main-tab-btn:hover {
-  color: var(--soc-indigo-bright);
-  background: rgba(99, 102, 241, 0.08);
-}
-
-.main-tab-btn:hover::before {
-  transform: scaleX(1);
-  transform-origin: left;
+  background: #080f0b;
+  color: var(--green);
 }
 
 .main-tab-btn.active {
-  color: var(--soc-indigo-bright);
-  border-bottom-color: var(--soc-indigo);
-  box-shadow: 0 2px 12px rgba(99, 102, 241, 0.3);
+  background: rgba(0, 255, 136, 0.1);
+  color: var(--green);
+  border-bottom: 2px solid var(--green);
 }
 
-.main-tab-btn.active::before {
-  transform: scaleX(1);
-}
-
-/* Live Feed Specifics */
-.live-indicator {
-  color: var(--soc-neon-red);
-  font-weight: 700;
-  font-size: 0.85rem;
-  animation: pulse-mega 1.2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-  text-transform: uppercase;
-  letter-spacing: 0.15em;
-  filter: drop-shadow(0 0 12px var(--soc-red-glow-strong));
-  position: relative;
-  display: inline-block;
-}
-
-@keyframes pulse-mega {
-  0% {
-    opacity: 1;
-    filter: drop-shadow(0 0 8px rgba(255, 49, 49, 0.6));
-    transform: scale(1);
-  }
-  50% {
-    opacity: 0.6;
-    filter: drop-shadow(0 0 16px rgba(255, 49, 49, 0.8));
-    transform: scale(1.05);
-  }
-  100% {
-    opacity: 1;
-    filter: drop-shadow(0 0 8px rgba(255, 49, 49, 0.6));
-    transform: scale(1);
-  }
-}
-
-.video-placeholder {
-  background: linear-gradient(135deg, #000814 0%, #0a0f1f 50%, #1a1a2e 100%);
+/* ── VIDEO ── */
+.card {
   flex: 1;
-  min-height: 500px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+  border-right: 1px solid var(--border);
+}
+
+.video-container {
   position: relative;
+  flex: 1;
+  overflow: hidden;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: var(--soc-text-secondary);
-  border-top: 1px solid var(--soc-border);
-  overflow: hidden;
+  background: #000;
 }
 
-/* Animated scanlines */
-.video-placeholder::before {
-  content: '';
+.live-stream {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.corner {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background-image: 
-    repeating-linear-gradient(
-      0deg,
-      rgba(99, 102, 241, 0.04) 0px,
-      rgba(99, 102, 241, 0.04) 1px,
-      transparent 1px,
-      transparent 2px
-    );
-  pointer-events: none;
-  animation: scanlines 8s linear infinite;
-  z-index: 1;
+  width: 18px;
+  height: 18px;
+  border-color: var(--green);
+  border-style: solid;
+  opacity: 0.6;
 }
 
-@keyframes scanlines {
-  0% { transform: translateY(0); }
-  100% { transform: translateY(10px); }
+.corner-tl {
+  top: 8px;
+  left: 8px;
+  border-width: 2px 0 0 2px;
 }
 
-/* Vignette effect */
-.video-placeholder::after {
-  content: '';
+.corner-tr {
+  top: 8px;
+  right: 8px;
+  border-width: 2px 2px 0 0;
+}
+
+.corner-bl {
+  bottom: 8px;
+  left: 8px;
+  border-width: 0 0 2px 2px;
+}
+
+.corner-br {
+  bottom: 8px;
+  right: 8px;
+  border-width: 0 2px 2px 0;
+}
+
+.live-badge {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: radial-gradient(circle at center, transparent 0%, rgba(0, 0, 0, 0.4) 100%);
-  pointer-events: none;
-  z-index: 2;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--red);
+  color: #fff;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.6rem;
+  letter-spacing: 3px;
+  padding: 3px 10px;
+  animation: blinkbg 1.2s infinite;
 }
 
-.camera-overlay {
+.video-info {
   position: absolute;
-  top: 24px;
-  left: 24px;
-  color: var(--soc-indigo-bright);
-  background: rgba(11, 14, 20, 0.9);
-  padding: 12px 16px;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  border: 2px solid var(--soc-indigo);
-  box-shadow: 0 0 20px rgba(99, 102, 241, 0.5), inset 0 0 10px rgba(99, 102, 241, 0.1);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  font-weight: 700;
-  z-index: 5;
-  animation: float-up 3s ease-in-out infinite;
+  bottom: 10px;
+  left: 10px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.6rem;
+  color: rgba(0, 255, 136, 0.55);
+  line-height: 1.9;
 }
 
-@keyframes float-up {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-4px); }
+@keyframes blinkbg {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 
-.placeholder-content {
-  text-align: center;
-  z-index: 10;
-  position: relative;
-  animation: fade-in 1s ease-out 0.4s forwards;
-  opacity: 0;
-}
-
-@keyframes fade-in {
-  0% { opacity: 0; transform: translateY(10px); }
-  100% { opacity: 1; transform: translateY(0); }
-}
-
-.placeholder-content svg {
-  stroke: var(--soc-indigo-bright);
-  filter: drop-shadow(0 0 15px rgba(99, 102, 241, 0.5));
-  margin-bottom: 16px;
-  animation: pulse-icon 2s ease-in-out infinite;
-}
-
-@keyframes pulse-icon {
-  0%, 100% { filter: drop-shadow(0 0 15px rgba(99, 102, 241, 0.5)); }
-  50% { filter: drop-shadow(0 0 25px rgba(99, 102, 241, 0.8)); }
-}
-
-.placeholder-content p {
-  color: var(--soc-text-secondary);
-  font-size: 0.95rem;
-  letter-spacing: 0.02em;
-}
-
-/* Detected People Tab */
-.detected-container {
-  padding: 24px;
+/* ── DETECTION CARD ── */
+.detection-content {
   flex: 1;
-  background: linear-gradient(135deg, rgba(99, 102, 241, 0.04) 0%, transparent 100%);
   overflow-y: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 24px;
-  border-top: 1px solid var(--soc-border);
-}
-
-.detected-item {
-  background: linear-gradient(135deg, var(--soc-midnight-light) 0%, var(--soc-midnight-lighter) 100%);
-  padding: 20px;
-  border-radius: 6px;
-  border: 1px solid var(--soc-border);
+  padding: 12px;
   display: flex;
   flex-direction: column;
   gap: 12px;
-  transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-  position: relative;
-  overflow: hidden;
-  animation: item-appear 0.6s ease-out forwards;
-  opacity: 0;
-  transform: translateY(20px);
 }
 
-@keyframes item-appear {
-  0% { opacity: 0; transform: translateY(20px); }
-  100% { opacity: 1; transform: translateY(0); }
-}
-
-.detected-item:nth-child(1) { animation-delay: 0.1s; }
-.detected-item:nth-child(2) { animation-delay: 0.2s; }
-.detected-item:nth-child(3) { animation-delay: 0.3s; }
-
-.detected-item::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 3px;
-  background: linear-gradient(90deg, var(--soc-indigo) 0%, transparent 100%);
-  opacity: 0;
-  transition: opacity 0.4s ease;
-}
-
-.detected-item:hover::before {
-  opacity: 1;
-}
-
-.detected-item:hover {
-  border-color: var(--soc-indigo-bright);
-  box-shadow: 0 8px 24px rgba(99, 102, 241, 0.25), inset 0 0 20px rgba(99, 102, 241, 0.05);
-  background: linear-gradient(135deg, var(--soc-midnight-lighter) 0%, rgba(99, 102, 241, 0.08) 100%);
-  transform: translateY(-4px);
-}
-
-.person-info {
+.detection-section {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
 }
 
-.person-name {
-  font-weight: 700;
-  color: var(--soc-indigo-bright);
-  font-size: 1rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  text-shadow: 0 0 8px rgba(99, 102, 241, 0.2);
+.section-title {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.65rem;
+  letter-spacing: 2px;
+  padding: 8px 0;
+  margin: 0;
+  border-bottom: 1px solid var(--border);
 }
 
-.match-badge {
-  font-size: 0.75rem;
-  padding: 6px 10px;
-  border-radius: 4px;
-  background-color: rgba(99, 102, 241, 0.2);
-  color: var(--soc-indigo-bright);
-  border: 1.5px solid var(--soc-indigo);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-weight: 700;
-  width: fit-content;
-  box-shadow: 0 0 8px rgba(99, 102, 241, 0.2);
+.section-title.known-title {
+  color: var(--green);
 }
 
-.match-badge.known {
-  background-color: rgba(34, 197, 94, 0.2);
-  color: #22C55E;
-  border-color: #22C55E;
-  box-shadow: 0 0 12px rgba(34, 197, 94, 0.3);
+.section-title.unknown-title {
+  color: var(--red);
 }
 
-.match-badge.unknown {
-  background-color: var(--soc-red-glow-strong);
-  color: var(--soc-neon-red);
-  border-color: var(--soc-neon-red);
-  box-shadow: 0 0 16px var(--soc-red-glow-strong), inset 0 0 8px rgba(255, 49, 49, 0.2);
-  animation: pulse-unknown 1.5s ease-in-out infinite;
+.faces-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-@keyframes pulse-unknown {
-  0%, 100% { box-shadow: 0 0 16px var(--soc-red-glow-strong), inset 0 0 8px rgba(255, 49, 49, 0.2); }
-  50% { box-shadow: 0 0 24px var(--soc-red-glow-strong), inset 0 0 12px rgba(255, 49, 49, 0.3); }
-}
-
-.add-person-btn {
-  background: linear-gradient(135deg, var(--soc-indigo) 0%, var(--soc-indigo-dark) 100%);
-  color: white;
-  border: 1.5px solid var(--soc-indigo-bright);
-  padding: 8px 14px;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  cursor: pointer;
-  font-family: 'IBM Plex Mono', 'JetBrains Mono', monospace;
-  font-weight: 700;
-  transition: all 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  box-shadow: 0 0 12px rgba(99, 102, 241, 0.3);
+.face-item {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 8px 10px;
   position: relative;
+  transition: background 0.15s;
+}
+
+.face-item.known {
+  border-left: 3px solid var(--green);
+  background: rgba(0, 255, 136, 0.025);
+}
+
+.face-item.known:hover {
+  background: rgba(0, 255, 136, 0.05);
+}
+
+.face-item.unknown {
+  border-left: 3px solid var(--red);
+  background: rgba(255, 34, 68, 0.03);
+}
+
+.face-item.unknown:hover {
+  background: rgba(255, 34, 68, 0.06);
+}
+
+.face-item.scanning {
+  border-left: 3px solid var(--yellow);
+  background: rgba(255, 204, 0, 0.02);
+}
+
+.face-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.face-name {
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.face-item.known .face-name {
+  color: var(--green);
+}
+
+.face-item.unknown .face-name {
+  color: var(--red);
+}
+
+.face-item.scanning .face-name {
+  color: var(--yellow);
+}
+
+.badge {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.5rem;
+  letter-spacing: 2px;
+  padding: 2px 5px;
+  border-radius: 2px;
+}
+
+.badge-known {
+  background: rgba(0, 255, 136, 0.12);
+  color: var(--green);
+}
+
+.badge-unknown {
+  background: rgba(255, 34, 68, 0.12);
+  color: var(--red);
+  animation: blinktext 1s infinite;
+}
+
+.badge-scanning {
+  background: rgba(255, 204, 0, 0.1);
+  color: var(--yellow);
+}
+
+.face-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px 6px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.6rem;
+}
+
+.grid-item {
+  display: flex;
+  justify-content: space-between;
+}
+
+.grid-key {
+  color: var(--dim);
+}
+
+.grid-val {
+  color: var(--text);
+}
+
+@keyframes blinktext {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+.empty-state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--dim);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.8rem;
+  letter-spacing: 2px;
+}
+
+/* ── SIDE PANEL ── */
+.side-section {
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--panel);
+}
+
+.side-section.grow {
+  flex: 1;
   overflow: hidden;
 }
 
-.add-person-btn::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: -100%;
-  width: 100%;
-  height: 100%;
-  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.2) 50%, transparent 100%);
-  transition: left 0.4s ease;
+.section-header {
+  padding: 8px 14px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.6rem;
+  letter-spacing: 3px;
+  color: var(--dim);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  text-transform: uppercase;
 }
 
-.add-person-btn:hover::before {
-  left: 100%;
+.section-header.known-header {
+  color: var(--green);
 }
 
-.add-person-btn:hover {
-  background: linear-gradient(135deg, var(--soc-indigo-bright) 0%, var(--soc-indigo) 100%);
-  box-shadow: 0 0 24px rgba(99, 102, 241, 0.6);
-  transform: translateY(-2px);
+.section-header.unknown-header {
+  color: var(--red);
 }
 
-/* Logs View */
-.logs-view {
-  padding: 40px;
+.section-header.alert-header {
+  color: var(--yellow);
+}
+
+.section-body {
+  padding: 8px;
   overflow-y: auto;
-  height: 100%;
-  background: radial-gradient(circle at 20% 50%, rgba(99, 102, 241, 0.08) 0%, transparent 50%);
-  animation: page-load 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
-  opacity: 0;
+  max-height: 200px;
+  flex: 1;
 }
 
-@keyframes page-load {
-  0% { opacity: 0; transform: translateY(10px); }
-  100% { opacity: 1; transform: translateY(0); }
+.side-section.grow .section-body {
+  max-height: none;
 }
 
-.logs-card {
-  width: 100%;
-  animation: card-appear 0.8s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s forwards;
-  opacity: 0;
+.side-card {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  position: relative;
+  transition: background 0.15s;
 }
 
-.table-container {
-  padding: 0;
-  overflow-x: auto;
-  border-top: 1px solid var(--soc-border);
+.side-card.known {
+  border-left: 3px solid var(--green);
+  background: rgba(0, 255, 136, 0.025);
 }
 
-table {
-  width: 100%;
-  border-collapse: collapse;
-  text-align: left;
+.side-card.known:hover {
+  background: rgba(0, 255, 136, 0.05);
 }
 
-th {
-  background: linear-gradient(90deg, rgba(99, 102, 241, 0.15) 0%, rgba(0, 217, 255, 0.05) 100%);
-  padding: 16px 20px;
-  font-weight: 700;
-  font-size: 0.85rem;
-  color: var(--soc-indigo-bright);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  border-bottom: 2px solid var(--soc-indigo);
-  border-right: 1px solid var(--soc-border);
-  position: sticky;
-  top: 0;
+.side-card.unknown {
+  border-left: 3px solid var(--red);
+  background: rgba(255, 34, 68, 0.03);
 }
 
-th:last-child {
-  border-right: none;
+.side-card.unknown:hover {
+  background: rgba(255, 34, 68, 0.06);
 }
 
-td {
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--soc-border);
+.side-card.scanning {
+  border-left: 3px solid var(--yellow);
+  background: rgba(255, 204, 0, 0.02);
+}
+
+.card-name {
   font-size: 0.9rem;
-  color: var(--soc-text-primary);
-  font-family: 'IBM Plex Mono', 'JetBrains Mono', monospace;
-  transition: all 0.2s ease;
-}
-
-tr {
-  transition: all 0.3s ease;
-}
-
-tr:hover {
-  background-color: rgba(99, 102, 241, 0.08);
-  box-shadow: inset 0 0 15px rgba(99, 102, 241, 0.05);
-}
-
-tr:hover td {
-  color: var(--soc-indigo-bright);
-}
-
-.status-badge {
-  padding: 6px 12px;
-  border-radius: 4px;
-  font-size: 0.8rem;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  border: 1.5px solid;
-  display: inline-block;
-  font-family: 'IBM Plex Mono', 'JetBrains Mono', monospace;
+  letter-spacing: 1px;
+  margin-bottom: 4px;
 }
 
-.status-badge.authorized {
-  background-color: rgba(34, 197, 94, 0.2);
-  color: #22C55E;
-  border-color: #22C55E;
-  box-shadow: 0 0 12px rgba(34, 197, 94, 0.3), inset 0 0 8px rgba(34, 197, 94, 0.1);
+.side-card.known .card-name {
+  color: var(--green);
 }
 
-.status-badge.pending {
-  background-color: rgba(245, 158, 11, 0.2);
-  color: #F59E0B;
-  border-color: #F59E0B;
-  box-shadow: 0 0 12px rgba(245, 158, 11, 0.3), inset 0 0 8px rgba(245, 158, 11, 0.1);
+.side-card.unknown .card-name {
+  color: var(--red);
 }
 
-.status-badge.denied {
-  background-color: var(--soc-red-glow-strong);
-  color: var(--soc-neon-red);
-  border-color: var(--soc-neon-red);
-  box-shadow: 0 0 16px var(--soc-red-glow-strong), inset 0 0 10px rgba(255, 49, 49, 0.2);
-  animation: pulse-denied 1.5s ease-in-out infinite;
+.side-card.scanning .card-name {
+  color: var(--yellow);
 }
 
-@keyframes pulse-denied {
-  0%, 100% { box-shadow: 0 0 16px var(--soc-red-glow-strong), inset 0 0 10px rgba(255, 49, 49, 0.2); }
-  50% { box-shadow: 0 0 24px var(--soc-red-glow-strong), inset 0 0 14px rgba(255, 49, 49, 0.3); }
+.card-coords {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.55rem;
+  color: var(--dim);
+  letter-spacing: 1px;
 }
 
-/* Responsive */
-@media (max-width: 1024px) {
-  .dashboard-grid {
-    flex-direction: column;
-  }
+.side-card:last-child {
+  margin-bottom: 0;
+}
 
-  .sidebar {
-    width: 200px;
-  }
+/* ── ALERT LOG ── */
+.alert-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  margin-bottom: 2px;
+  border-radius: 2px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.6rem;
+  animation: fadeIn 0.25s ease;
+}
 
-  .logo h2 {
-    font-size: 1.1rem;
-  }
+.alert-item.known {
+  background: rgba(0, 255, 136, 0.05);
+  color: var(--gd);
+}
 
-  .top-bar h1 {
-    font-size: 1.3rem;
-  }
+.alert-item.unknown {
+  background: rgba(255, 34, 68, 0.07);
+  color: var(--red);
+}
 
-  .top-bar {
-    padding: 16px 24px;
-  }
+.alert-time {
+  color: var(--dim);
+  flex-shrink: 0;
+}
 
-  .dashboard-grid {
-    padding: 24px;
-    gap: 24px;
-  }
+.alert-name {
+  font-weight: bold;
+  letter-spacing: 2px;
+}
 
-  .main-tabs {
-    padding: 0 24px;
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
 
-/* Scrollbar Styling */
+.empty-message {
+  text-align: center;
+  padding: 20px 8px;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 0.62rem;
+  color: var(--dim);
+  letter-spacing: 2px;
+}
+
+/* ── SCROLLBAR ── */
 ::-webkit-scrollbar {
-  width: 12px;
-  height: 12px;
+  width: 3px;
 }
 
 ::-webkit-scrollbar-track {
-  background: linear-gradient(180deg, var(--soc-midnight-light) 0%, var(--soc-midnight) 100%);
+  background: var(--bg);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, var(--soc-indigo) 0%, var(--soc-cyan) 100%);
-  border-radius: 6px;
-  border: 3px solid var(--soc-midnight);
-  box-shadow: 0 0 10px rgba(99, 102, 241, 0.4);
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(180deg, var(--soc-indigo-bright) 0%, var(--soc-indigo) 100%);
-  box-shadow: 0 0 20px rgba(99, 102, 241, 0.8);
+  background: var(--border);
+  border-radius: 2px;
 }
 </style>
