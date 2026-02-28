@@ -46,6 +46,7 @@ COSINE_MATCH_THRESHOLD = 0.40
 VERIFICATION_FREQ = 10       # Re-verify more often so votes accumulate faster
 VOTE_HISTORY_SIZE = 7        # Rolling window of results to vote over
 MAX_WORKERS = 1              # Must be 1: TensorFlow/Keras is NOT thread-safe for concurrent inference
+HTTP_PORT = 5001
 
 # --- DNN Face Detector ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -79,6 +80,16 @@ class APIHandler(BaseHTTPRequestHandler):
 
     def log_message(self, *args) -> None:
         pass
+
+    def _send_json(self, payload: str) -> None:
+        body = payload.encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Cache-Control", "no-cache, no-store")
+        self.end_headers()
+        self.wfile.write(body)
 
     def do_GET(self):
         # ── /video_feed  (MJPEG stream) ──
@@ -358,6 +369,8 @@ def open_camera():
     return None
 
 def main():
+    global latest_known, latest_unknown, latest_counts, latest_frame_bytes, alert_log
+
     if DeepFace is None:
         print(f"Error: DeepFace failed to import.\nDetails: {DEEPFACE_IMPORT_ERROR}\nFix: pip install tf-keras deepface")
         return
@@ -365,7 +378,7 @@ def main():
     precompute_db()
 
     # Start HTTP API
-    server = ThreadedHTTPServer(("0.0.0.0", 5001), APIHandler)
+    server = ThreadedHTTPServer(("0.0.0.0", HTTP_PORT), APIHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print(f"  API  →  http://localhost:{HTTP_PORT}/data")
     print(f"  Feed →  http://localhost:{HTTP_PORT}/video_feed\n")
@@ -416,6 +429,7 @@ def main():
                     
                     # Generate alerts if identity shifted from Scanning to something else
                     if old_name == "SCANNING..." and voted_name != "SCANNING...":
+
                         if voted_name == "UNKNOWN":
                             alert_log.append({"type": "UNKNOWN", "name": "INTRUDER", "time": time.strftime("%H:%M:%S")})
                         else:
@@ -466,6 +480,7 @@ def main():
             cv2.putText(frame, f"({cx}, {cy})", (x, y+h+16), cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1)
 
         # 6. Update HTTP Shared State
+        _, buf = cv2.imencode(".jpg", frame)
         with state_lock:
             latest_known       = k_list
             latest_unknown     = u_list

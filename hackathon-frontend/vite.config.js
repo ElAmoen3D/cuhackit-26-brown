@@ -6,10 +6,13 @@ export default defineConfig({
   plugins: [vue()],
   server: {
     proxy: {
-      // This magically forwards your frontend requests to the Express backend!
-      '/data': 'http://localhost:8080',
-      '/live': 'http://localhost:8080',
-      '/health': 'http://localhost:8080'
+      '/data':   'http://localhost:5001',
+      '/health': 'http://localhost:5001',
+      // /live in the frontend maps to /video_feed on the Python server
+      '/live': {
+        target: 'http://localhost:5001',
+        rewrite: () => '/video_feed'
+      }
     }
   }
 })
