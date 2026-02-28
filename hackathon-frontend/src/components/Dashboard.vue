@@ -13,7 +13,7 @@ import ActivityAnalyzer from './ActivityAnalyzer.vue'
 
 const { loginWithRedirect, logout, isAuthenticated, user, isLoading } = useAuth0();
 
-const logoutRedirectUri = import.meta.env.VITE_AUTH0_REDIRECT_URI;
+const logoutRedirectUri = window.location.origin;
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface FaceCoords {
@@ -258,8 +258,10 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (pollTimer)  clearInterval(pollTimer)
-  if (clockTimer) clearInterval(clockTimer)
+  if (pollTimer)      clearInterval(pollTimer)
+  if (clockTimer)     clearInterval(clockTimer)
+  if (_retryTimer)    clearTimeout(_retryTimer)
+  if (_countdownTimer) clearInterval(_countdownTimer)
 })
 </script>
 
@@ -326,12 +328,7 @@ onUnmounted(() => {
           <button class="hdr-icon-btn" title="Notifications">
             <component :is="Bell" :size="18" />
           </button>
-          <div v-if="isLoading">
-            <button class="hdr-icon-btn" title="Loading...">
-              ...
-            </button>
-          </div>
-          <div v-else-if="isAuthenticated" style="display: flex; align-items: center; gap: 8px;">
+          <div v-if="isAuthenticated" style="display: flex; align-items: center; gap: 8px;">
             <img :src="user.picture" :alt="user.name" style="width: 34px; height: 34px; border-radius: 7px;" />
             <button @click="logout({ logoutParams: { returnTo: logoutRedirectUri }})" class="hdr-icon-btn" title="Logout">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
@@ -405,11 +402,12 @@ onUnmounted(() => {
               <span :class="['cam-dot', systemOnline ? 'online' : 'offline']"></span>
             </div>
             <div class="cam-body">
-              <img v-if="!streamError" :src="STREAM_URL" class="cam-stream" alt="Live feed" @error="streamError = true" />
+              <img v-if="!streamError" :key="streamKey" :src="STREAM_URL" class="cam-stream" alt="Live feed" @error="handleStreamError" @load="_retryDelay = 3000" />
               <div v-else class="cam-offline-overlay">
                 <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
                 <p>STREAM OFFLINE</p>
-                <button @click="streamError = false">↺ Retry</button>
+                <p v-if="retryIn > 0" class="retry-countdown">Reconnecting in {{ retryIn }}s…</p>
+                <button @click="reconnectStream()">&#x21BA; Retry Now</button>
               </div>
 
             </div>
@@ -545,38 +543,42 @@ onUnmounted(() => {
                 :key="person.id"
                 :class="['detected-item', person.type]"
               >
-                <div :class="['person-avatar', person.type]">
-                  <span>{{ person.type === 'unknown' ? '?' : person.type === 'scanning' ? '…' : person.name.charAt(0) }}</span>
+                <div class="detected-top">
+                  <div :class="['person-avatar', person.type]">
+                    <span>{{ person.type === 'unknown' ? '?' : person.type === 'scanning' ? '…' : person.name.charAt(0) }}</span>
+                  </div>
+
+                  <div class="person-info">
+                    <span class="person-name">{{ person.name }}</span>
+
+                    <span :class="['match-badge', person.type]">
+                      <span v-if="person.type === 'known'">✓ &nbsp;VERIFIED</span>
+                      <span v-else-if="person.type === 'scanning'">⟳ &nbsp;SCANNING</span>
+                      <span v-else>✗ &nbsp;UNRECOGNIZED</span>
+                    </span>
+
+                    <span v-if="person.coords" class="coords">
+                      pos ({{ person.coords.center_x }}, {{ person.coords.center_y }})
+                      &nbsp;·&nbsp;
+                      {{ person.coords.w }}×{{ person.coords.h }}px
+                    </span>
+                  </div>
                 </div>
 
-                <div class="person-info">
-                  <span class="person-name">{{ person.name }}</span>
-
-                  <span :class="['match-badge', person.type]">
-                    <span v-if="person.type === 'known'">✓ &nbsp;VERIFIED</span>
-                    <span v-else-if="person.type === 'scanning'">⟳ &nbsp;SCANNING</span>
-                    <span v-else>✗ &nbsp;UNRECOGNIZED</span>
-                  </span>
-
-                  <span v-if="person.coords" class="coords">
-                    pos ({{ person.coords.center_x }}, {{ person.coords.center_y }})
-                    &nbsp;·&nbsp;
-                    {{ person.coords.w }}×{{ person.coords.h }}px
-                  </span>
+                <div class="detected-actions">
+                  <button v-if="person.type === 'unknown'" class="add-person-btn">
+                    <component :is="UserPlus" :size="14" />
+                    Enroll
+                  </button>
+                  <button
+                    class="analyze-ai-btn"
+                    title="Analyze with Microsoft Copilot"
+                    @click="analyzWithCopilot(person)"
+                  >
+                    <component :is="Bot" :size="14" />
+                    Analyze
+                  </button>
                 </div>
-
-                <button v-if="person.type === 'unknown'" class="add-person-btn">
-                  <component :is="UserPlus" :size="14" />
-                  Enroll
-                </button>
-                <button
-                  class="analyze-ai-btn"
-                  title="Analyze with Microsoft Copilot"
-                  @click="analyzWithCopilot(person)"
-                >
-                  <component :is="Bot" :size="14" />
-                  Analyze
-                </button>
               </div>
             </div>
           </div>
@@ -1912,6 +1914,7 @@ onUnmounted(() => {
   transition: all 0.18s ease;
 }
 .retry-btn:hover { background: var(--surface-3); border-color: var(--accent); color: var(--accent); }
+.retry-countdown { font-size: 0.72rem; color: var(--text-muted); margin-top: -6px; }
 
 /* ── DETECTED PEOPLE ────────────────────────────────────────────────────────── */
 .detected-container {
@@ -1925,13 +1928,25 @@ onUnmounted(() => {
 
 .detected-item {
   display: flex;
-  align-items: center;
-  gap: 14px;
+  flex-direction: column;
+  gap: 12px;
   padding: 14px 16px;
   border: 1px solid var(--border-soft);
   border-radius: 7px;
   background: var(--surface-2);
   transition: border-color 0.18s ease, background 0.18s ease;
+}
+.detected-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.detected-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .detected-item:hover { border-color: var(--border); background: var(--surface-3); }
 .detected-item.unknown { border-left: 3px solid var(--accent); }
@@ -2085,7 +2100,6 @@ tr:hover td { background: var(--surface-2); }
   padding: 6px 11px; border-radius: 5px;
   font-family: var(--sans); font-size: 0.73rem; font-weight: 600;
   cursor: pointer; flex-shrink: 0;
-  margin-left: 4px;
 }
 .analyze-ai-btn:hover {
   background: rgba(59,130,246,0.18);

@@ -26,19 +26,38 @@ echo [2/3] Starting Node server (port 8080)...
 start "Node Server" /MIN cmd /c "cd /d %~dp0video_processing\camera_backend && node server.js"
 timeout /t 2 /nobreak >nul
 
-:: Start localtunnel and show URL
-echo [3/3] Starting tunnel...
+:: Start localtunnel and retry until we get the secureview-app subdomain
+echo [3/3] Starting tunnel (will retry until secureview-app subdomain is available)...
 echo.
 echo ========================================
-echo   Your public URL will appear below.
-echo   Look for: https://xxxx.loca.lt
+echo   Target URL: https://secureview-app.loca.lt
 echo   Password: visit https://api.ipify.org
 echo             and enter that IP on the page
 echo   Ctrl+C to stop the tunnel.
 echo   (Python + Node keep running after)
 echo ========================================
 echo.
-npx localtunnel --port 8080
+:tunnel_retry
+set TUNNEL_OUT=%TEMP%\lt_out_%RANDOM%.txt
+start /B cmd /c "npx localtunnel --port 8080 --subdomain secureview-app > %TUNNEL_OUT% 2>&1"
+timeout /t 7 /nobreak >nul
+findstr /i "secureview-app" %TUNNEL_OUT% >nul 2>&1
+if %errorlevel%==0 (
+    echo Got secureview-app — tunnel is live!
+    type %TUNNEL_OUT%
+    echo.
+    echo Tunnel is running. Press Ctrl+C to stop.
+    :keep_alive
+    timeout /t 30 /nobreak >nul
+    goto keep_alive
+) else (
+    echo Wrong subdomain assigned — killing tunnel and retrying in 3s...
+    for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":8080 " ^| findstr ESTABLISHED') do taskkill /F /PID %%p >nul 2>&1
+    taskkill /F /IM node.exe /FI "WINDOWTITLE eq *localtunnel*" >nul 2>&1
+    del /f /q %TUNNEL_OUT% >nul 2>&1
+    timeout /t 3 /nobreak >nul
+    goto tunnel_retry
+)
 
 echo.
 echo Tunnel closed. Python and Node are still running in the background.
