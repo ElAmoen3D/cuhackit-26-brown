@@ -215,67 +215,6 @@ class APIHandler(BaseHTTPRequestHandler):
             self.send_response(404)
             self.end_headers()
 
-    def do_POST(self):
-        # ── /enroll  (crop & save unknown face into face_db) ──
-        if self.path.startswith("/enroll"):
-            try:
-                length = int(self.headers.get("Content-Length", 0))
-                body = json.loads(self.rfile.read(length)) if length else {}
-                qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-                x = int(body.get("x", qs.get("x", [0])[0]))
-                y = int(body.get("y", qs.get("y", [0])[0]))
-                w = int(body.get("w", qs.get("w", [0])[0]))
-                h = int(body.get("h", qs.get("h", [0])[0]))
-
-                with state_lock:
-                    raw = latest_frame_np
-
-                if raw is None or w <= 0 or h <= 0:
-                    self._send_json(json.dumps({"success": False, "error": "No frame available"}))
-                    return
-
-                fh_frame, fw_frame = raw.shape[:2]
-                mx, my = int(w * 0.20), int(h * 0.20)
-                x1 = max(0, x - mx)
-                y1 = max(0, y - my)
-                x2 = min(fw_frame, x + w + mx)
-                y2 = min(fh_frame, y + h + my)
-                crop = raw[y1:y2, x1:x2]
-
-                if crop.size == 0:
-                    self._send_json(json.dumps({"success": False, "error": "Empty crop"}))
-                    return
-
-                random_hex = os.urandom(3).hex()
-                filename = f"person_{random_hex}.jpg"
-                filepath = os.path.join(FACE_DB_DIR, filename)
-                cv2.imwrite(filepath, crop)
-
-                # Hot-load embedding so recognition works immediately
-                enrolled_name = f"PERSON_{random_hex.upper()}"
-                try:
-                    norm_crop = normalize_face_lighting(crop.copy())
-                    with MODEL_LOCK:
-                        results = DeepFace.represent(
-                            img_path=norm_crop, model_name=VERIFICATION_MODEL,
-                            enforce_detection=False, align=True, detector_backend="skip"
-                        )
-                    if results:
-                        REFERENCE_DATA.append({
-                            "name": enrolled_name,
-                            "embedding": np.array(results[0]["embedding"])
-                        })
-                        logger.info(f"Enrolled new face: {enrolled_name} → {filename}")
-                except Exception as emb_err:
-                    logger.warning(f"Enrolled face saved but embedding failed: {emb_err}")
-
-                self._send_json(json.dumps({"success": True, "filename": filename, "name": enrolled_name}))
-            except Exception as e:
-                self._send_json(json.dumps({"success": False, "error": str(e)}))
-        else:
-            self.send_response(404)
-            self.end_headers()
-
 # ── Image Prep & Detection Models ──────────────────────────────────────────────
 def auto_adjust_brightness(frame):
     """Scale frame so its mean brightness matches TARGET_BRIGHTNESS (0-255).

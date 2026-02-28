@@ -122,32 +122,6 @@ app.delete('/face_db/:filename', (req, res) => {
   }
 })
 
-// ── POST /enroll — crop unknown face from live frame and add to database ────────
-app.post('/enroll', (req, res) => {
-  const body = JSON.stringify(req.body ?? {})
-  const options = {
-    hostname: PYTHON_HOST,
-    port:     PYTHON_PORT,
-    path:     '/enroll',
-    method:   'POST',
-    headers: {
-      'Content-Type':   'application/json',
-      'Content-Length': Buffer.byteLength(body),
-    },
-  }
-  const pythonReq = http.request(options, pRes => {
-    let raw = ''
-    pRes.on('data', c => raw += c)
-    pRes.on('end', () => {
-      res.setHeader('Content-Type', 'application/json')
-      res.send(raw)
-    })
-  })
-  pythonReq.on('error', () => res.status(503).json({ success: false, error: 'Python offline' }))
-  pythonReq.write(body)
-  pythonReq.end()
-})
-
 // ── GET /snapshot — single JPEG frame grabbed from the MJPEG stream ───────────
 function getSnapshot() {
   return new Promise(resolve => {
