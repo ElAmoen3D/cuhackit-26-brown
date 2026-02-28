@@ -124,14 +124,14 @@ const detectedPeople = ref([
 .dashboard-container {
   display: flex;
   height: 100vh;
-  background-color: #f3f4f6;
+  background-color: #eafaf1;
   color: #1f2937;
 }
 
 /* Sidebar */
 .sidebar {
   width: 250px;
-  background-color: #111827;
+  background-color: #065f46;
   color: white;
   display: flex;
   flex-direction: column;
@@ -139,13 +139,13 @@ const detectedPeople = ref([
 
 .logo {
   padding: 20px;
-  border-bottom: 1px solid #374151;
+  border-bottom: 1px solid #059669;
 }
 
 .logo h2 {
   margin: 0;
   font-size: 1.5rem;
-  color: #60a5fa;
+  color: var(--vt-c-green-light);
 }
 
 .sidebar nav ul {
@@ -161,8 +161,8 @@ const detectedPeople = ref([
 }
 
 .sidebar nav li:hover, .sidebar nav li.active {
-  background-color: #1f2937;
-  border-left: 4px solid #60a5fa;
+  background-color: #059669;
+  border-left: 4px solid var(--vt-c-green-light);
 }
 
 /* Main Content */
@@ -187,10 +187,11 @@ const detectedPeople = ref([
   margin: 0;
   font-size: 1.5rem;
   font-weight: 600;
+  color: var(--vt-c-green-dark);
 }
 
 .login-btn {
-  background-color: #2563eb;
+  background-color: var(--vt-c-green-dark);
   color: white;
   border: none;
   padding: 10px 20px;
@@ -201,7 +202,7 @@ const detectedPeople = ref([
 }
 
 .login-btn:hover {
-  background-color: #1d4ed8;
+  background-color: var(--vt-c-green);
 }
 
 /* Dashboard Grid */
@@ -235,6 +236,7 @@ const detectedPeople = ref([
   margin: 0;
   font-size: 1.1rem;
   font-weight: 600;
+  color: var(--vt-c-green-dark);
 }
 
 /* Tabs */
@@ -255,13 +257,13 @@ const detectedPeople = ref([
 }
 
 .tab-btn.active {
-  color: #2563eb;
-  border-bottom-color: #2563eb;
+  color: var(--vt-c-green-dark);
+  border-bottom-color: var(--vt-c-green-dark);
 }
 
 /* Live Feed Specifics */
 .live-indicator {
-  color: #ef4444;
+  color: var(--vt-c-green-dark);
   font-weight: bold;
   font-size: 0.8rem;
   animation: pulse 2s infinite;
@@ -325,6 +327,7 @@ const detectedPeople = ref([
 
 .person-name {
   font-weight: 600;
+  color: var(--vt-c-green-dark);
 }
 
 .match-badge {
@@ -341,12 +344,12 @@ const detectedPeople = ref([
 }
 
 .match-badge.unknown {
-  background-color: #fee2e2;
-  color: #991b1b;
+  background-color: #d1fae5;
+  color: #065f46;
 }
 
 .add-person-btn {
-  background-color: #10b981;
+  background-color: var(--vt-c-green-dark);
   color: white;
   border: none;
   padding: 6px 12px;
@@ -356,14 +359,14 @@ const detectedPeople = ref([
 }
 
 .add-person-btn:hover {
-  background-color: #059669;
+  background-color: var(--vt-c-green);
 }
 
 /* Database Specifics */
 .view-all-btn {
   background: none;
   border: none;
-  color: #2563eb;
+  color: var(--vt-c-green-dark);
   cursor: pointer;
   font-size: 0.9rem;
 }
@@ -408,13 +411,13 @@ td {
 }
 
 .status-badge.pending {
-  background-color: #fef3c7;
-  color: #92400e;
+  background-color: #d1fae5;
+  color: #065f46;
 }
 
 .status-badge.denied {
-  background-color: #fee2e2;
-  color: #991b1b;
+  background-color: #d1fae5;
+  color: #065f46;
 }
 
 /* Responsive */
