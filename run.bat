@@ -39,8 +39,12 @@ echo ========================================
 echo.
 :tunnel_retry
 set TUNNEL_OUT=%TEMP%\lt_out_%RANDOM%.txt
-start /B cmd /c "npx localtunnel --port 8080 --subdomain secureview-app > %TUNNEL_OUT% 2>&1"
-timeout /t 7 /nobreak >nul
+set TUNNEL_PID_FILE=%TEMP%\lt_pid.txt
+
+:: Launch via PowerShell so we capture the real top-level PID
+powershell -NoProfile -Command "$p = Start-Process 'cmd' -ArgumentList '/c','npx localtunnel --port 8080 --subdomain secureview-app' -RedirectStandardOutput '%TUNNEL_OUT%' -PassThru -NoNewWindow; $p.Id | Out-File '%TUNNEL_PID_FILE%' -Encoding ASCII -NoNewline"
+
+timeout /t 10 /nobreak >nul
 findstr /i "secureview-app" %TUNNEL_OUT% >nul 2>&1
 if %errorlevel%==0 (
     echo Got secureview-app — tunnel is live!
@@ -52,8 +56,13 @@ if %errorlevel%==0 (
     goto keep_alive
 ) else (
     echo Wrong subdomain assigned — killing tunnel and retrying in 3s...
-    powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -like '*localtunnel*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
-    del /f /q %TUNNEL_OUT% >nul 2>&1
+    :: Kill the full process tree by PID (takes out cmd.exe + node children)
+    for /f "usebackq delims=" %%p in ("%TUNNEL_PID_FILE%") do (
+        taskkill /F /T /PID %%p >nul 2>&1
+    )
+    :: Belt-and-suspenders: also nuke any stray localtunnel node processes
+    powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*localtunnel*' -or $_.CommandLine -like '*/lt.js*' -or $_.CommandLine -like '*loca.lt*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+    del /f /q %TUNNEL_OUT% %TUNNEL_PID_FILE% >nul 2>&1
     timeout /t 3 /nobreak >nul
     goto tunnel_retry
 )

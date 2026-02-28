@@ -70,7 +70,7 @@ UNKNOWN_CONFIRM_FRAMES = 60  # Frames a face must stay UNKNOWN before being surf
 # ── Brightness Auto-Adjustment ────────────────────────────────────────────────
 # Set TARGET_BRIGHTNESS to a value 0–255 to automatically scale each frame so
 # its mean luminance matches that level.  Set to -1 to disable.
-TARGET_BRIGHTNESS = 50   # ← change this value to  control target brightness
+TARGET_BRIGHTNESS = 128   # ← change this value to  control target brightness
 
 # --- DNN Face Detector ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
