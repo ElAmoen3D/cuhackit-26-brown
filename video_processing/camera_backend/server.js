@@ -19,8 +19,7 @@
  *   GEMINI_MODEL         model name (default: gemini-2.0-flash)
  */
 
-// Load .env from the workspace root (two levels up from video_processing/camera_backend/)
-require('dotenv').config({ path: require('path').join(__dirname, '../../.env') })
+require('dotenv').config()
 
 const express = require('express')
 const http    = require('http')
@@ -155,131 +154,16 @@ app.get('/snapshot', async (req, res) => {
   res.send(buf)
 })
 
-// ── Gemini rate-limit state ───────────────────────────────────────────────────
-// Free-tier limits for gemini-2.5-flash: 5 RPM, 250 000 TPM, 20 RPD
-const GEMINI_LIMITS = { rpm: 5, tpm: 250_000, rpd: 20 }
-
-// Minimum gap between any two live API calls (ms).
-// 60 000 ms / 5 RPM = 12 000 ms; add 1 s buffer → 13 s.
-const GEMINI_MIN_INTERVAL_MS = 13_000
-let   geminiLastCallTs = 0   // timestamp of the most recent live call
-
-// Per-subject result cache (avoids burning a request for the same person twice).
-// TTL: 5 minutes.  Key: subject name (lowercased).
-const GEMINI_CACHE_TTL_MS = 5 * 60_000
-const geminiCache = new Map() // key → { analysis, ts }
-
-function getCachedAnalysis (subject) {
-  const key   = (subject || 'unknown').toLowerCase()
-  const entry = geminiCache.get(key)
-  if (!entry) return null
-  if (Date.now() - entry.ts > GEMINI_CACHE_TTL_MS) { geminiCache.delete(key); return null }
-  return entry.analysis
-}
-
-function setCachedAnalysis (subject, analysis) {
-  const key = (subject || 'unknown').toLowerCase()
-  geminiCache.set(key, { analysis, ts: Date.now() })
-}
-
-// Seconds until the next live call is allowed (0 = ready now)
-function geminiCooldownSec () {
-  const elapsed = Date.now() - geminiLastCallTs
-  return elapsed >= GEMINI_MIN_INTERVAL_MS ? 0 : Math.ceil((GEMINI_MIN_INTERVAL_MS - elapsed) / 1000)
-}
-
-// Sliding-window buckets (timestamps in ms / token counts)
-const geminiRate = {
-  minuteRequests: [],   // timestamps of requests in the last 60 s
-  minuteTokens:   [],   // { ts, tokens } pairs in the last 60 s
-  dayRequests:    [],   // timestamps of requests today (midnight-reset)
-}
-
-function pruneGeminiRate () {
-  const now     = Date.now()
-  const oneMin  = now - 60_000
-  const midnightToday = new Date(now)
-  midnightToday.setHours(0, 0, 0, 0)
-
-  geminiRate.minuteRequests = geminiRate.minuteRequests.filter(t  => t  > oneMin)
-  geminiRate.minuteTokens   = geminiRate.minuteTokens  .filter(e  => e.ts > oneMin)
-  geminiRate.dayRequests    = geminiRate.dayRequests   .filter(t  => t  >= midnightToday.getTime())
-}
-
-function geminiRateStatus () {
-  pruneGeminiRate()
-  const usedRpm  = geminiRate.minuteRequests.length
-  const usedTpm  = geminiRate.minuteTokens.reduce((s, e) => s + e.tokens, 0)
-  const usedRpd  = geminiRate.dayRequests.length
-
-  // Seconds until the oldest minute-window request expires
-  const nextRpmReset = geminiRate.minuteRequests.length
-    ? Math.ceil((geminiRate.minuteRequests[0] + 60_000 - Date.now()) / 1000)
-    : 0
-
-  return {
-    rpm:  { used: usedRpm,  limit: GEMINI_LIMITS.rpm,  remaining: Math.max(0, GEMINI_LIMITS.rpm  - usedRpm)  },
-    tpm:  { used: usedTpm,  limit: GEMINI_LIMITS.tpm,  remaining: Math.max(0, GEMINI_LIMITS.tpm  - usedTpm)  },
-    rpd:  { used: usedRpd,  limit: GEMINI_LIMITS.rpd,  remaining: Math.max(0, GEMINI_LIMITS.rpd  - usedRpd)  },
-    nextRpmResetSec: nextRpmReset,
-    cooldownSec: geminiCooldownSec(),
-  }
-}
-
-// Rough token estimator (avoids an extra API call)
-// ~4 chars per token for English text; images cost ~258 tokens each on Gemini
-function estimateTokens (text, hasImage) {
-  return Math.ceil(text.length / 4) + (hasImage ? 258 : 0)
-}
-
-// ── GET /gemini/rate-status — expose quota info to the frontend ───────────────
-app.get('/gemini/rate-status', (req, res) => {
-  res.json(geminiRateStatus())
-})
-
 // ── POST /gemini/analyze — analyze footage via Google Gemini Vision ──────────
 app.post('/gemini/analyze', async (req, res) => {
-  // Wrap everything so unhandled errors return JSON, not Express's HTML 500 page
-  try {
   const { subject, coords } = req.body ?? {}
 
   const apiKey   = process.env.GEMINI_API_KEY
-  const model    = process.env.GEMINI_MODEL || 'gemini-2.5-flash'
+  const model    = process.env.GEMINI_MODEL || 'gemini-2.0-flash'
 
   if (!apiKey) {
     return res.status(503).json({
       error: 'Gemini API not configured. Set GEMINI_API_KEY in your .env file.'
-    })
-  }
-
-  // ── Rate-limit check ────────────────────────────────────────────────────────
-  const status = geminiRateStatus()
-
-  // 1. Check subject cache — return instantly if we have a fresh result
-  const cached = getCachedAnalysis(subject)
-  if (cached) {
-    return res.json({ analysis: cached, fromCache: true, rateLimit: status })
-  }
-
-  // 2. Enforce minimum inter-request gap (prevents bursting all 5 RPM slots)
-  if (status.cooldownSec > 0) {
-    return res.status(429).json({
-      error: `Please wait ${status.cooldownSec}s before the next analysis (min interval: ${GEMINI_MIN_INTERVAL_MS / 1000}s).`,
-      rateLimit: status,
-    })
-  }
-
-  // 3. Hard quota checks
-  if (status.rpd.remaining <= 0) {
-    return res.status(429).json({
-      error: `Daily request limit reached (${GEMINI_LIMITS.rpd} RPD). Resets at midnight.`,
-      rateLimit: status,
-    })
-  }
-  if (status.rpm.remaining <= 0) {
-    return res.status(429).json({
-      error: `Rate limit: too many requests. Try again in ${status.nextRpmResetSec}s (limit: ${GEMINI_LIMITS.rpm} RPM).`,
-      rateLimit: status,
     })
   }
 
@@ -302,22 +186,6 @@ app.post('/gemini/analyze', async (req, res) => {
     `Analyze this security camera frame. ${isUnknown ? 'An UNRECOGNIZED person' : `Person identified as "${subject}"`} ` +
     `has been flagged by the detection system.${positionNote} ` +
     `Provide a behavioral analysis and summarize what this person appears to be doing.`
-
-  // Estimate token usage; reject if it would blow the per-minute TPM budget
-  const estimatedTokens = estimateTokens(userText, !!snapshotB64) + 600 // +600 for max output
-  if (status.tpm.remaining < estimatedTokens) {
-    return res.status(429).json({
-      error: `Token budget exhausted for this minute (~${estimatedTokens} tokens needed, ${status.tpm.remaining} remaining). Wait ${status.nextRpmResetSec}s.`,
-      rateLimit: status,
-    })
-  }
-
-  // ── Record this request against all three windows ───────────────────────────
-  const now = Date.now()
-  geminiLastCallTs = now   // start the per-request cooldown
-  geminiRate.minuteRequests.push(now)
-  geminiRate.dayRequests.push(now)
-  geminiRate.minuteTokens.push({ ts: now, tokens: estimatedTokens })
 
   const parts = [{ text: userText }]
   if (snapshotB64) {
@@ -349,25 +217,9 @@ app.post('/gemini/analyze', async (req, res) => {
     geminiRes.on('end', () => {
       try {
         const parsed = JSON.parse(raw)
-        // If Gemini itself returned a 429 / quota error, surface it clearly
-        if (parsed.error) {
-          const msg = parsed.error.message || 'Gemini API error'
-          const statusCode = parsed.error.code === 429 ? 429 : 500
-          return res.status(statusCode).json({ error: msg, rateLimit: geminiRateStatus() })
-        }
+        if (parsed.error) return res.status(500).json({ error: parsed.error.message })
         const analysis = parsed.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? 'No analysis returned.'
-        // Refine token count with actuals if the API returned them
-        const actualTokens =
-          (parsed.usageMetadata?.promptTokenCount ?? 0) +
-          (parsed.usageMetadata?.candidatesTokenCount ?? 0)
-        if (actualTokens > 0) {
-          // Replace the estimate with the real count so future checks are accurate
-          const entry = geminiRate.minuteTokens.find(e => e.ts === now)
-          if (entry) entry.tokens = actualTokens
-        }
-        // Cache result so the same person can be re-analyzed for free for 5 min
-        setCachedAnalysis(subject, analysis)
-        res.json({ analysis, fromCache: false, rateLimit: geminiRateStatus() })
+        res.json({ analysis })
       } catch {
         res.status(500).json({ error: 'Failed to parse Gemini response.' })
       }
@@ -376,9 +228,6 @@ app.post('/gemini/analyze', async (req, res) => {
   geminiReq.on('error', e => res.status(500).json({ error: e.message }))
   geminiReq.write(body)
   geminiReq.end()
-  } catch (err) {
-    if (!res.headersSent) res.status(500).json({ error: err.message || 'Gemini route error' })
-  }
 })
 
 // ── Internal helper: proxy a JSON request to Python ──────────────────────────
@@ -389,20 +238,9 @@ function proxyJSON(pythonPath, res, offlineFallback) {
       let raw = ''
       pRes.on('data', (chunk) => (raw += chunk))
       pRes.on('end', () => {
-        // If Python returned a non-2xx status or an empty/non-JSON body,
-        // fall back to the offline payload so the frontend always gets valid JSON.
-        const status = pRes.statusCode || 500
-        if (status < 200 || status >= 300) {
-          return res.status(503).json(offlineFallback)
-        }
-        const trimmed = raw.trim()
-        if (!trimmed || trimmed[0] === '<') {
-          // Empty body or an accidental HTML response — use offline fallback
-          return res.status(503).json(offlineFallback)
-        }
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
         res.setHeader('Content-Type', 'application/json')
-        res.send(trimmed)
+        res.send(raw)
       })
     }
   )
@@ -529,17 +367,6 @@ app.get('/live', (req, res) => {
   }
 
   connectToPython()
-})
-
-// ── Global JSON error handler (must be after all routes) ────────────────────
-// Ensures that any Express or middleware error returns JSON, never HTML.
-app.use((err, req, res, _next) => {
-  console.error('[Express Error]', err)
-  if (!res.headersSent) {
-    res.status(err.status || err.statusCode || 500).json({
-      error: err.message || 'Internal server error'
-    })
-  }
 })
 
 // ── SPA fallback — serve index.html for all other routes ─────────────────────

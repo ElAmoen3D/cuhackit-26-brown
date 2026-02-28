@@ -230,92 +230,22 @@ const geminiLoading   = ref(false)
 const geminiResult    = ref<string | null>(null)
 const geminiSubject   = ref<string>('')
 const geminiError     = ref<string | null>(null)
-const geminiIsRateLimited = ref(false)
-const geminiFromCache = ref(false)
-
-// Cooldown countdown (seconds) — prevents the user from hammering the button
-const geminiCooldown  = ref(0)
-let   geminiCooldownTimer: ReturnType<typeof setInterval> | null = null
-
-function startGeminiCooldown(seconds: number): void {
-  if (geminiCooldownTimer) clearInterval(geminiCooldownTimer)
-  geminiCooldown.value = seconds
-  if (seconds <= 0) return
-  geminiCooldownTimer = setInterval(() => {
-    geminiCooldown.value = Math.max(0, geminiCooldown.value - 1)
-    if (geminiCooldown.value === 0 && geminiCooldownTimer) {
-      clearInterval(geminiCooldownTimer)
-      geminiCooldownTimer = null
-    }
-  }, 1000)
-}
-
-interface GeminiQuota {
-  rpm:  { used: number; limit: number; remaining: number }
-  tpm:  { used: number; limit: number; remaining: number }
-  rpd:  { used: number; limit: number; remaining: number }
-  nextRpmResetSec: number
-  cooldownSec: number
-}
-const geminiQuota = ref<GeminiQuota | null>(null)
-
-async function refreshGeminiQuota(): Promise<void> {
-  try {
-    const res = await fetch('/gemini/rate-status')
-    if (res.ok) {
-      const q = await res.json()
-      geminiQuota.value = q
-      // Sync cooldown with server's current value (e.g. after page reload)
-      if (q.cooldownSec > 0 && geminiCooldown.value === 0) {
-        startGeminiCooldown(q.cooldownSec)
-      }
-    }
-  } catch { /* swallow — quota display is non-critical */ }
-}
 
 async function analyzWithGemini(person: { name: string; coords: FaceCoords | null }): Promise<void> {
-  if (geminiCooldown.value > 0) return   // button should already be disabled; guard anyway
-  geminiSubject.value       = person.name
-  geminiResult.value        = null
-  geminiError.value         = null
-  geminiIsRateLimited.value = false
-  geminiFromCache.value     = false
-  geminiLoading.value       = true
-  showGeminiModal.value     = true
-  await refreshGeminiQuota()
+  geminiSubject.value   = person.name
+  geminiResult.value    = null
+  geminiError.value     = null
+  geminiLoading.value   = true
+  showGeminiModal.value = true
   try {
     const res = await fetch('/gemini/analyze', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ subject: person.name, coords: person.coords }),
     })
-    const contentType = res.headers.get('content-type') ?? ''
-    if (!contentType.includes('application/json')) {
-      throw new Error(
-        res.status === 503 ? 'Backend offline — start the server and try again'
-        : `Server error (${res.status}): response was not JSON`
-      )
-    }
     const data = await res.json()
-    // Update quota from every response (success or 429)
-    if (data.rateLimit) {
-      geminiQuota.value = data.rateLimit
-      // Only start cooldown for live calls (cache hits have cooldownSec = 0)
-      if (!data.fromCache && data.rateLimit.cooldownSec > 0) {
-        startGeminiCooldown(data.rateLimit.cooldownSec)
-      }
-    }
-    if (res.status === 429) {
-      geminiIsRateLimited.value = true
-      // Keep any in-progress cooldown from the rateLimit payload
-      if (data.rateLimit?.cooldownSec > 0) startGeminiCooldown(data.rateLimit.cooldownSec)
-      throw new Error(data.error ?? 'Rate limit exceeded')
-    }
-    if (!res.ok || data.error) throw new Error(data.error ?? `Request failed (${res.status})`)
-    geminiFromCache.value = !!data.fromCache
-    geminiResult.value    = data.analysis
-    // Start the cooldown only for live (non-cached) responses
-    if (!data.fromCache) startGeminiCooldown(13)
+    if (!res.ok || data.error) throw new Error(data.error ?? 'Request failed')
+    geminiResult.value = data.analysis
   } catch (err: any) {
     geminiError.value = err.message ?? 'Analysis failed'
   } finally {
@@ -352,11 +282,10 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (pollTimer)           clearInterval(pollTimer)
-  if (clockTimer)          clearInterval(clockTimer)
-  if (_retryTimer)         clearTimeout(_retryTimer)
-  if (_countdownTimer)     clearInterval(_countdownTimer)
-  if (geminiCooldownTimer) clearInterval(geminiCooldownTimer)
+  if (pollTimer)      clearInterval(pollTimer)
+  if (clockTimer)     clearInterval(clockTimer)
+  if (_retryTimer)    clearTimeout(_retryTimer)
+  if (_countdownTimer) clearInterval(_countdownTimer)
 })
 </script>
 
@@ -711,12 +640,10 @@ onUnmounted(() => {
 
                   <button
                     class="ipl-ai-btn"
-                    :disabled="geminiCooldown > 0"
-                    :title="geminiCooldown > 0 ? `Cooldown: ${geminiCooldown}s` : 'Analyze with Gemini'"
+                    title="Analyze with Gemini"
                     @click="analyzWithGemini(person)"
                   >
-                    <span v-if="geminiCooldown > 0" class="ipl-ai-cd">{{ geminiCooldown }}s</span>
-                    <component v-else :is="Bot" :size="12" />
+                    <component :is="Bot" :size="12" />
                   </button>
                 </div>
               </div>
@@ -801,13 +728,11 @@ onUnmounted(() => {
                   </button>
                   <button
                     class="analyze-ai-btn"
-                    :disabled="geminiCooldown > 0"
-                    :title="geminiCooldown > 0 ? `Cooldown: ${geminiCooldown}s` : 'Analyze with Gemini'"
+                    title="Analyze with Gemini"
                     @click="analyzWithGemini(person)"
                   >
                     <component :is="Bot" :size="14" />
-                    <span v-if="geminiCooldown > 0">{{ geminiCooldown }}s</span>
-                    <span v-else>Analyze</span>
+                    Analyze
                   </button>
                 </div>
               </div>
@@ -1030,33 +955,6 @@ onUnmounted(() => {
                 {{ geminiSubject || 'Unknown' }}
               </span>
             </div>
-
-            <!-- Rate-limit quota bar -->
-            <div v-if="geminiQuota" class="gemini-quota">
-              <div class="gemini-quota-row">
-                <span class="gemini-quota-label">RPM</span>
-                <div class="gemini-quota-bar-wrap">
-                  <div
-                    class="gemini-quota-bar-fill"
-                    :class="{ 'quota-warn': geminiQuota.rpm.remaining <= 1, 'quota-ok': geminiQuota.rpm.remaining > 1 }"
-                    :style="{ width: (geminiQuota.rpm.used / geminiQuota.rpm.limit * 100) + '%' }"
-                  />
-                </div>
-                <span class="gemini-quota-nums">{{ geminiQuota.rpm.remaining }}/{{ geminiQuota.rpm.limit }} left</span>
-              </div>
-              <div class="gemini-quota-row">
-                <span class="gemini-quota-label">RPD</span>
-                <div class="gemini-quota-bar-wrap">
-                  <div
-                    class="gemini-quota-bar-fill"
-                    :class="{ 'quota-warn': geminiQuota.rpd.remaining <= 3, 'quota-ok': geminiQuota.rpd.remaining > 3 }"
-                    :style="{ width: (geminiQuota.rpd.used / geminiQuota.rpd.limit * 100) + '%' }"
-                  />
-                </div>
-                <span class="gemini-quota-nums">{{ geminiQuota.rpd.remaining }}/{{ geminiQuota.rpd.limit }} left today</span>
-              </div>
-            </div>
-
             <div v-if="geminiLoading" class="gemini-loading">
               <div class="gemini-dots"><span></span><span></span><span></span></div>
               <p class="gemini-loading-label">Analyzing footage with Gemini…</p>
@@ -1064,23 +962,14 @@ onUnmounted(() => {
             <div v-else-if="geminiError" class="gemini-error">
               <component :is="AlertTriangle" :size="18" />
               <div>
-                <p class="gemini-err-title">{{ geminiIsRateLimited ? 'Rate Limit Reached' : 'Analysis Failed' }}</p>
+                <p class="gemini-err-title">Analysis Failed</p>
                 <p class="gemini-err-msg">{{ geminiError }}</p>
-                <p v-if="geminiIsRateLimited && geminiQuota?.nextRpmResetSec" class="gemini-err-hint">
-                  Window resets in {{ geminiQuota.nextRpmResetSec }}s
-                </p>
               </div>
             </div>
             <div v-else-if="geminiResult" class="gemini-result-wrap">
-              <div class="gemini-result-header">
-                <p class="gemini-result-label">Behavioral Analysis Report</p>
-                <span v-if="geminiFromCache" class="gemini-cache-badge" title="Served from cache — no API call was made">⚡ cached</span>
-              </div>
+              <p class="gemini-result-label">Behavioral Analysis Report</p>
               <div class="gemini-result-text">{{ geminiResult }}</div>
-              <div class="gemini-timestamp">
-                {{ geminiFromCache ? 'From cache · ' : '' }}Generated by Google Gemini
-                <span v-if="geminiCooldown > 0" class="gemini-next-hint">&nbsp;· next in {{ geminiCooldown }}s</span>
-              </div>
+              <div class="gemini-timestamp">Generated by Google Gemini</div>
             </div>
           </div>
         </div>
@@ -1922,16 +1811,11 @@ h1, h2, h3, .sys-label, .ph-system {
   border-radius: 5px;
   color: #60a5fa; cursor: pointer; transition: all 0.15s;
 }
-.ipl-ai-btn:hover:not(:disabled) {
+.ipl-ai-btn:hover {
   background: rgba(59,130,246,0.18);
   border-color: rgba(59,130,246,0.45);
   color: #93c5fd;
 }
-.ipl-ai-btn:disabled {
-  opacity: 0.45; cursor: not-allowed;
-  background: rgba(59,130,246,0.03);
-}
-.ipl-ai-cd { font-size: 9px; font-family: var(--mono); font-weight: 700; }
 
 .ipl-summary {
   font-size: 11px;
@@ -2080,8 +1964,7 @@ h1, h2, h3, .sys-label, .ph-system {
   font-family: var(--sans); font-size: 0.72rem; font-weight: 600;
   cursor: pointer; flex-shrink: 0; margin-left: 4px;
 }
-.analyze-ai-btn:hover:not(:disabled) { background: rgba(59,130,246,0.18); border-color: rgba(59,130,246,0.5); color: #93c5fd; }
-.analyze-ai-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.analyze-ai-btn:hover { background: rgba(59,130,246,0.18); border-color: rgba(59,130,246,0.5); color: #93c5fd; }
 
 /* ── LOGS ─────────────────────────────────────────────────────────────────── */
 .logs-view { padding: 0; overflow-y: auto; flex: 1; }
@@ -2565,43 +2448,11 @@ tr:hover td { background: var(--surface-2); }
 }
 .gemini-err-title { font-size: 13px; font-weight: 600; color: #f87171; margin-bottom: 4px; }
 .gemini-err-msg   { font-size: 11.5px; color: var(--text-muted); font-family: var(--mono); }
-.gemini-err-hint  { font-size: 10.5px; color: #f59e0b; font-family: var(--mono); margin-top: 4px; }
-/* ── Quota bar ────────────────────────────────────────────────────────── */
-.gemini-quota {
-  display: flex; flex-direction: column; gap: 6px;
-  padding: 10px 12px;
-  background: var(--surface-2); border: 1px solid var(--border-soft);
-  border-radius: 8px;
-}
-.gemini-quota-row   { display: flex; align-items: center; gap: 8px; }
-.gemini-quota-label { font-size: 9.5px; font-weight: 700; text-transform: uppercase;
-                      letter-spacing: .08em; color: var(--text-muted); font-family: var(--mono);
-                      width: 28px; flex-shrink: 0; }
-.gemini-quota-bar-wrap {
-  flex: 1; height: 5px; background: var(--surface-3); border-radius: 3px; overflow: hidden;
-}
-.gemini-quota-bar-fill {
-  height: 100%; border-radius: 3px; transition: width .4s ease;
-}
-.gemini-quota-bar-fill.quota-ok   { background: #22c55e; }
-.gemini-quota-bar-fill.quota-warn { background: #f59e0b; }
-.gemini-quota-nums {
-  font-size: 10px; color: var(--text-muted); font-family: var(--mono);
-  white-space: nowrap; min-width: 80px; text-align: right;
-}
 .gemini-result-wrap { display: flex; flex-direction: column; gap: 10px; }
-.gemini-result-header { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .gemini-result-label {
   font-size: 9.5px; font-weight: 600; text-transform: uppercase;
   letter-spacing: 0.1em; color: var(--text-muted); font-family: var(--mono);
 }
-.gemini-cache-badge {
-  font-size: 9px; font-weight: 700; font-family: var(--mono); letter-spacing: .05em;
-  padding: 2px 6px; border-radius: 4px;
-  background: rgba(245,158,11,0.12); color: #f59e0b;
-  border: 1px solid rgba(245,158,11,0.3);
-}
-.gemini-next-hint { color: #f59e0b; }
 .gemini-result-text {
   background: var(--surface-2); border: 1px solid var(--border-soft);
   border-left: 3px solid #3b82f6; border-radius: 8px;

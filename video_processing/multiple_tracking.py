@@ -28,12 +28,6 @@ import logging
 import asyncio
 import numpy as np
 import urllib.request
-
-try:
-    from dotenv import load_dotenv
-    load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', '.env'))
-except ImportError:
-    pass  # python-dotenv not installed; fall back to system env vars
 import urllib.parse
 from collections import deque, Counter
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -48,11 +42,11 @@ except Exception as import_error:
     DEEPFACE_IMPORT_ERROR = import_error
 
 try:
-    from gpt4o_analyzer import get_analyzer
-    OPENAI_AVAILABLE = True
+    from gemini_analyzer import get_analyzer
+    GEMINI_AVAILABLE = True
 except ImportError:
-    OPENAI_AVAILABLE = False
-    logging.warning("GPT-4o analyzer not available - install openai pillow")
+    GEMINI_AVAILABLE = False
+    logging.warning("Gemini analyzer not available - install google-generativeai pillow")
 
 # Configure logging
 logging.basicConfig(
@@ -103,17 +97,18 @@ alert_log           = deque(maxlen=25)
 REFERENCE_DATA      = []
 MODEL_LOCK          = threading.Lock()
 
-# ── OpenAI GPT-4o Activity Analysis ──────────────────────────────────────────
-OPENAI_API_KEY            = os.environ.get("OPENAI_API_KEY", "")
-OPENAI_MODEL              = os.environ.get("OPENAI_MODEL", "gpt-4o")
-activity_analysis_enabled = OPENAI_AVAILABLE and bool(OPENAI_API_KEY)
+# ── Gemini Activity Analysis ──────────────────────────────────────────────────
+GEMINI_API_KEY            = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL              = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+activity_analysis_enabled = GEMINI_AVAILABLE and bool(GEMINI_API_KEY)
 suspicious_activities_log = deque(maxlen=100)
-gpt4o_analyzer            = None
+gemini_analyzer           = None
 
-# ── Per-frame analysis buffer (1 frame every ~2 seconds per unknown face) ──────
+# ── 10-second video buffer per unknown face ───────────────────────────────────
 # Each entry: {'frames': [(timestamp, crop_ndarray), ...], 'start_time': float}
-ANALYSIS_BUFFER_SECONDS = 2   # Fire a GPT-4o call every 2 seconds
-ANALYSIS_SAMPLE_FRAMES  = 1   # Send 1 frame per call
+# Frames are sampled at ~1 fps so the buffer stays small.
+GEMINI_BUFFER_SECONDS = 10    # Collect this many seconds before calling Gemini
+GEMINI_SAMPLE_FRAMES  = 8     # Evenly-sampled frames sent in one API request
 unknown_face_buffers  = {}    # face_id -> buffer dict
 activity_processing   = set() # face IDs currently being analyzed (global)
 
@@ -184,7 +179,7 @@ class APIHandler(BaseHTTPRequestHandler):
             self._send_json(json.dumps({
                 "status":     "online",
                 "identities": len(REFERENCE_DATA),
-                "gpt4o_enabled": activity_analysis_enabled,
+                "gemini_enabled": activity_analysis_enabled,
                 "suspicious_activities": len(suspicious_activities_log),
                 "timestamp":  time.time(),
             }))
@@ -222,32 +217,6 @@ class APIHandler(BaseHTTPRequestHandler):
                 self.wfile.write(body)
             except Exception as e:
                 self.send_response(500); self.end_headers()
-
-        # ── /suspicious-activities ──
-        elif self.path == "/suspicious-activities":
-            with state_lock:
-                activities = list(suspicious_activities_log)
-            self._send_json(json.dumps({
-                "activities": activities,
-                "total_count": len(activities),
-                "timestamp": time.time()
-            }))
-
-        # ── /activity-summary/<face_id> ──
-        elif self.path.startswith("/activity-summary/"):
-            face_id = self.path.split("/activity-summary/", 1)[1].split("?")[0]
-            if gpt4o_analyzer:
-                summary = gpt4o_analyzer.get_activity_summary(face_id)
-            else:
-                summary = {
-                    "face_id": face_id,
-                    "total_detections": 0,
-                    "suspicious_count": 0,
-                    "avg_suspicion": 0.0,
-                    "max_suspicion": 0.0,
-                    "risk_trend": "UNKNOWN",
-                }
-            self._send_json(json.dumps(summary))
 
         else:
             self.send_response(404)
@@ -441,14 +410,14 @@ def identify_face(face_crop):
 
 async def analyze_unknown_activity(face_id: str, face_crops: list, coordinates: Dict, frame_timestamp: float):
     """
-    Analyze suspicious activity for an unknown face.
-    Encodes sampled crops to JPEG and sends them in a single GPT-4o Vision request.
+    Analyze suspicious activity for an unknown face using a 10-second video buffer.
+    Encodes all sampled crops to JPEG and sends them in a single Gemini request.
     Removes the face from activity_processing when done so the next buffer window
     can begin.
     """
     global activity_processing
 
-    if not activity_analysis_enabled or not gpt4o_analyzer:
+    if not activity_analysis_enabled or not gemini_analyzer:
         activity_processing.discard(face_id)
         return
 
@@ -465,11 +434,11 @@ async def analyze_unknown_activity(face_id: str, face_crops: list, coordinates: 
             return
 
         logger.info(
-            f"Sending {len(frame_bytes_list)}-frame chunk for face {face_id} to GPT-4o..."
+            f"Sending {len(frame_bytes_list)}-frame video chunk for face {face_id} to Gemini..."
         )
 
-        # Call the GPT-4o Vision analyzer
-        analysis = await gpt4o_analyzer.analyze_video_chunk_async(
+        # Call the multi-frame (video chunk) analyzer
+        analysis = await gemini_analyzer.analyze_video_chunk_async(
             frame_bytes_list,
             face_id,
             "UNKNOWN",
@@ -598,22 +567,22 @@ def open_camera():
 
 def main():
     global latest_known, latest_unknown, latest_counts, latest_frame_bytes, latest_frame_np, alert_log
-    global gpt4o_analyzer, activity_analysis_enabled
+    global gemini_analyzer, activity_analysis_enabled
 
     if DeepFace is None:
         print(f"Error: DeepFace failed to import.\nDetails: {DEEPFACE_IMPORT_ERROR}\nFix: pip install tf-keras deepface")
         return
 
-    # Initialize GPT-4o analyzer if enabled
+    # Initialize Gemini analyzer if enabled
     if activity_analysis_enabled:
         try:
-            gpt4o_analyzer = get_analyzer(OPENAI_API_KEY, OPENAI_MODEL)
-            logger.info("GPT-4o activity analyzer initialized successfully")
-            print("✓ GPT-4o activity detection ENABLED (1 frame every ~2s)")
+            gemini_analyzer = get_analyzer(GEMINI_API_KEY, GEMINI_MODEL)
+            logger.info("Gemini activity analyzer initialized successfully")
+            print("✓ Gemini activity detection ENABLED")
         except Exception as e:
-            logger.warning(f"Failed to initialize GPT-4o analyzer: {e}")
+            logger.warning(f"Failed to initialize Gemini analyzer: {e}")
             activity_analysis_enabled = False
-            print("✗ GPT-4o activity detection DISABLED")
+            print("✗ Gemini activity detection DISABLED")
 
     precompute_db()
 
@@ -718,7 +687,7 @@ def main():
                     except queue.Full:
                         pass
 
-            # ── Per-frame buffering for GPT-4o Vision analysis ──────────────────
+            # ── 10-second frame buffering for Gemini video-chunk analysis ──────
             # Only buffer confirmed unknown faces that are not already being analysed
             if (activity_analysis_enabled and
                 data["name"] == "UNKNOWN" and
@@ -733,20 +702,20 @@ def main():
 
                 buf = unknown_face_buffers[face_id]
 
-                # Sample 1 frame every 1.5 seconds
-                if not buf["frames"] or (now - buf["frames"][-1][0]) >= 1.5:
+                # Sample ~1 frame per second to keep memory low
+                if not buf["frames"] or (now - buf["frames"][-1][0]) >= 1.0:
                     face_crop = crop_with_margin(frame, data["box"], margin_ratio=0.25)
                     if face_crop.size > 0:
                         buf["frames"].append((now, face_crop.copy()))
 
-                # After ANALYSIS_BUFFER_SECONDS have elapsed, fire a single API request
+                # After GEMINI_BUFFER_SECONDS have elapsed, fire a single API request
                 elapsed = now - buf["start_time"]
-                if elapsed >= ANALYSIS_BUFFER_SECONDS and len(buf["frames"]) >= 1:
+                if elapsed >= GEMINI_BUFFER_SECONDS and len(buf["frames"]) >= 2:
                     try:
                         frames = buf["frames"]
-                        # Evenly sample up to ANALYSIS_SAMPLE_FRAMES frames
-                        if len(frames) > ANALYSIS_SAMPLE_FRAMES:
-                            indices = np.linspace(0, len(frames) - 1, ANALYSIS_SAMPLE_FRAMES, dtype=int)
+                        # Evenly sample up to GEMINI_SAMPLE_FRAMES frames
+                        if len(frames) > GEMINI_SAMPLE_FRAMES:
+                            indices = np.linspace(0, len(frames) - 1, GEMINI_SAMPLE_FRAMES, dtype=int)
                             sampled_crops = [frames[i][1] for i in indices]
                         else:
                             sampled_crops = [f[1] for f in frames]
@@ -822,7 +791,7 @@ def main():
             cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)
             cv2.rectangle(frame, (x, y-th-14), (x+tw+10, y), color, -1)
-            cv2.putText(frame, label, (x+5, y-5), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (255,255,255), 2)
+            cv2.putText(frame, label, (x+5, y-5), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (0,0,0), 2)
             cv2.putText(frame, f"({cx}, {cy})", (x, y+h+16), cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1)
 
         # 6. Update HTTP Shared State
@@ -851,10 +820,10 @@ def main():
     cap.release()
     cv2.destroyAllWindows()
     
-    # Cleanup GPT-4o analyzer
-    if gpt4o_analyzer:
-        gpt4o_analyzer.close()
-        logger.info("GPT-4o analyzer closed")
+    # Cleanup Gemini analyzer
+    if gemini_analyzer:
+        gemini_analyzer.close()
+        logger.info("Gemini analyzer closed")
     
     print("Stopped.")
 
