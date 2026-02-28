@@ -536,16 +536,16 @@ onMounted(() => {
 }
 
 .login-btn {
-  background: linear-gradient(135deg, var(--soc-indigo) 0%, var(--soc-indigo-dark) 100%);
+  background: linear-gradient(135deg, #a855f7 0%, #9333ea 100%);
   color: white;
-  border: 2px solid var(--soc-indigo-bright);
+  border: 2px solid #d8b4fe;
   padding: 12px 28px;
   border-radius: 6px;
   cursor: pointer;
   font-weight: 700;
   font-family: 'IBM Plex Mono', 'JetBrains Mono', monospace;
   transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-  box-shadow: 0 0 20px rgba(99, 102, 241, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  box-shadow: 0 0 25px rgba(168, 85, 247, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.2);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   position: relative;
@@ -562,7 +562,7 @@ onMounted(() => {
   left: -100%;
   width: 100%;
   height: 100%;
-  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.2) 50%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.3) 50%, transparent 100%);
   transition: left 0.5s ease;
 }
 
@@ -571,13 +571,13 @@ onMounted(() => {
 }
 
 .login-btn:hover {
-  background: linear-gradient(135deg, var(--soc-indigo-bright) 0%, var(--soc-indigo) 100%);
-  box-shadow: 0 0 40px rgba(99, 102, 241, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 0 20px rgba(99, 102, 241, 0.6);
+  background: linear-gradient(135deg, #c084fc 0%, #a855f7 100%);
+  box-shadow: 0 0 50px rgba(168, 85, 247, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 0 30px rgba(168, 85, 247, 0.8);
   transform: translateY(-2px);
 }
 
 .login-btn:active {
-  box-shadow: 0 0 20px rgba(99, 102, 241, 0.6), inset 0 2px 4px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 30px rgba(168, 85, 247, 0.7), inset 0 2px 4px rgba(0, 0, 0, 0.3);
   transform: translateY(0);
 }
 
