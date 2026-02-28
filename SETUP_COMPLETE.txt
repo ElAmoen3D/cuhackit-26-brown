@@ -1,0 +1,116 @@
+╔════════════════════════════════════════════════════════════════════════╗
+║                                                                        ║
+║            🎉 CUHackit 2026 - Launch Scripts Ready! 🎉              ║
+║                                                                        ║
+╚════════════════════════════════════════════════════════════════════════╝
+
+✅ WINDOWS USERS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Pick ONE option:
+
+  Option 1: Double-click run.bat (Easiest!)
+  Option 2: PowerShell → .\run.ps1
+  Option 3: Manual setup in LAUNCH_GUIDE.md
+
+
+✅ macOS USERS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Run in Terminal:
+
+    ./run.sh
+
+  (First time: chmod +x run.sh)
+
+
+✅ LINUX USERS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Run in Terminal:
+
+    ./run.sh
+
+  (First time: chmod +x run.sh)
+
+
+📋 REQUIRED SETUP (One-time, all platforms)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  1. Copy .env template:
+       cp .env.example .env
+
+  2. Edit .env and add your Copilot API key:
+       COPILOT_API_KEY=sk-ant-xxxxx
+       (Get one from: https://console.anthropic.com/)
+
+  3. Save and run the launch script
+
+
+📚 DOCUMENTATION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  📖 QUICK_START.md       → 2-minute quick setup
+  📖 LAUNCH_GUIDE.md      → Detailed guide + troubleshooting
+  📖 SCRIPTS_OVERVIEW.md  → Technical details of scripts
+
+
+🚀 WHAT HAPPENS WHEN YOU RUN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  ✓ Checks Python & Node.js installation
+  ✓ Kills old processes (port cleanup)
+  ✓ Auto-installs missing dependencies
+  ✓ Starts Python Backend (port 5001)
+  ✓ Starts Express Server (port 8080)
+  ✓ Starts Vue Frontend (port 5173)
+  ✓ Shows service URLs
+
+  Wait ~20 seconds for TensorFlow to load...
+  Then open: http://localhost:5173
+
+
+🎯 EXPECTED RESULT
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Professional dashboard with:
+  ✓ Live video feed
+  ✓ Face detection & recognition
+  ✓ AI threat analysis (Copilot)
+  ✓ Activity monitoring
+  ✓ System status tracking
+  ✓ Security controls
+
+
+⚙️ SYSTEM REQUIREMENTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  • Python 3.8 or higher
+  • Node.js 14 or higher
+  • 4GB RAM (8GB recommended)
+  • Camera (USB or built-in)
+  • Internet connection (for Copilot)
+
+
+🔧 TROUBLESHOOTING
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  "Python/Node not found?" → Install from python.org / nodejs.org
+  "Permission denied?"     → chmod +x run.sh (macOS/Linux)
+  "Port already in use?"   → Close other applications
+  "Dashboard blank?"       → Wait 30 seconds, refresh browser
+
+  Full troubleshooting: See LAUNCH_GUIDE.md
+
+
+📍 SERVICE PORTS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Python Backend:  http://localhost:5001
+  Express Server:  http://localhost:8080
+  Vue Dashboard:   http://localhost:5173  ← OPEN THIS!
+
+
+🛑 HOW TO STOP
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  macOS/Linux:  Press Ctrl+C in terminal
+  Windows:      Close all command windows
+
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+                    Ready to launch? 🚀
+
+           Follow the instructions for your OS above!
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
