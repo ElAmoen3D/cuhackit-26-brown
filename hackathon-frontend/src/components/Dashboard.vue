@@ -1,10 +1,10 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { ChevronLeft, ChevronRight } from 'lucide-vue-next'
+import { Menu, X } from 'lucide-vue-next'
 
 const activeTab = ref('live')
 const currentPage = ref('dashboard') // 'dashboard' or 'logs'
-const sidebarPosition = ref('left')
+const sidebarOpen = ref(true)
 
 const people = ref([
   { id: 1, name: 'Alice Johnson', status: 'Authorized', time: '10:42 AM' },
@@ -20,34 +20,35 @@ const detectedPeople = ref([
   { id: 103, name: 'Evan Wright', type: 'known', match: '92%' },
 ])
 
-const toggleSidebarPosition = () => {
-  sidebarPosition.value = sidebarPosition.value === 'left' ? 'right' : 'left'
-  localStorage.setItem('sidebarPosition', sidebarPosition.value)
+const toggleSidebar = () => {
+  sidebarOpen.value = !sidebarOpen.value
+  localStorage.setItem('sidebarOpen', sidebarOpen.value)
 }
 
 onMounted(() => {
-  // Load sidebar position from localStorage
-  const savedPosition = localStorage.getItem('sidebarPosition')
-  if (savedPosition) {
-    sidebarPosition.value = savedPosition
+  // Load sidebar state from localStorage
+  const savedState = localStorage.getItem('sidebarOpen')
+  if (savedState !== null) {
+    sidebarOpen.value = savedState === 'true'
   }
 })
 </script>
 
 <template>
   <div class="dashboard-container">
+    <!-- Sidebar Toggle Button -->
+    <button 
+      class="sidebar-toggle-btn"
+      @click="toggleSidebar"
+      title="Toggle sidebar"
+      :aria-label="sidebarOpen ? 'Close sidebar' : 'Open sidebar'"
+    >
+      <Menu v-if="sidebarOpen" :size="24" />
+      <X v-else :size="24" />
+    </button>
+
     <!-- Sidebar -->
-    <aside class="sidebar" :class="{ 'sidebar-right': sidebarPosition === 'right' }">
-      <button 
-        class="position-toggle-btn"
-        @click="toggleSidebarPosition"
-        title="Toggle sidebar position"
-        :aria-label="sidebarPosition === 'left' ? 'Move sidebar to right' : 'Move sidebar to left'"
-      >
-        <ChevronLeft v-if="sidebarPosition === 'right'" :size="18" />
-        <ChevronRight v-else :size="18" />
-      </button>
-      
+    <aside class="sidebar" :class="{ 'sidebar-collapsed': !sidebarOpen }">
       <div class="logo">
         <h2>SecureView</h2>
       </div>
@@ -242,6 +243,37 @@ onMounted(() => {
   50% { opacity: 1; }
 }
 
+/* Sidebar Toggle Button */
+.sidebar-toggle-btn {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(99, 102, 241, 0.05) 100%);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  color: #818CF8;
+  cursor: pointer;
+  padding: 10px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  width: 44px;
+  height: 44px;
+  z-index: 100;
+}
+
+.sidebar-toggle-btn:hover {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3) 0%, rgba(99, 102, 241, 0.15) 100%);
+  border-color: rgba(99, 102, 241, 0.6);
+  color: #E1E8ED;
+  transform: scale(1.1);
+}
+
+.sidebar-toggle-btn:active {
+  transform: scale(0.95);
+}
+
 /* Sidebar */
 .sidebar {
   width: 280px;
@@ -254,45 +286,15 @@ onMounted(() => {
   box-shadow: inset -8px 0 32px rgba(99, 102, 241, 0.08), -4px 0 16px rgba(0, 0, 0, 0.5);
   position: relative;
   z-index: 10;
-  transition: border 0.4s ease, box-shadow 0.4s ease, order 0.4s ease;
+  transition: width 0.3s ease, transform 0.3s ease, opacity 0.3s ease;
 }
 
-.sidebar.sidebar-right {
-  border-right: none;
-  border-left: 2px solid var(--soc-indigo);
-  box-shadow: inset 8px 0 32px rgba(99, 102, 241, 0.08), 4px 0 16px rgba(0, 0, 0, 0.5);
-  order: 2;
-}
-
-/* Position toggle button */
-.position-toggle-btn {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  background: rgba(99, 102, 241, 0.1);
-  border: 1px solid rgba(99, 102, 241, 0.3);
-  color: #818CF8;
-  cursor: pointer;
-  padding: 8px;
-  border-radius: 6px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.3s ease;
-  width: 36px;
-  height: 36px;
-  z-index: 11;
-}
-
-.position-toggle-btn:hover {
-  background: rgba(99, 102, 241, 0.2);
-  border-color: rgba(99, 102, 241, 0.5);
-  color: #E1E8ED;
-  transform: scale(1.1);
-}
-
-.position-toggle-btn:active {
-  transform: scale(0.95);
+.sidebar.sidebar-collapsed {
+  width: 0;
+  transform: translateX(-100%);
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
 }
 
 /* Sidebar animated accent line */
