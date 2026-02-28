@@ -24,6 +24,8 @@ import queue
 import gc
 import json
 import time
+import logging
+import asyncio
 import numpy as np
 import urllib.request
 import urllib.parse
@@ -93,6 +95,14 @@ latest_frame_np     = None
 alert_log           = deque(maxlen=25)
 REFERENCE_DATA      = []
 MODEL_LOCK          = threading.Lock()
+
+# ── Copilot Activity Analysis ─────────────────────────────────────────────────
+COPILOT_API_KEY          = os.environ.get("COPILOT_API_KEY", "")
+COPILOT_MODEL            = os.environ.get("COPILOT_MODEL", "gpt-4o")
+activity_analysis_enabled = COPILOT_AVAILABLE and bool(COPILOT_API_KEY)
+suspicious_activities_log = deque(maxlen=100)
+copilot_analyzer          = None
+unknown_face_crops        = {}
 
 # ── THREADING HTTP SERVER ──────────────────────────────────────────────────────
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -494,6 +504,7 @@ def open_camera():
 
 def main():
     global latest_known, latest_unknown, latest_counts, latest_frame_bytes, latest_frame_np, alert_log
+    global copilot_analyzer, activity_analysis_enabled
 
     if DeepFace is None:
         print(f"Error: DeepFace failed to import.\nDetails: {DEEPFACE_IMPORT_ERROR}\nFix: pip install tf-keras deepface")
@@ -604,11 +615,15 @@ def main():
                     cx, cy = int(x + w/2), int(y + h/2)
                     coords = {"x": int(x), "y": int(y), "w": int(w), "h": int(h), "center_x": cx, "center_y": cy}
                     
-                    # Run async activity analysis
+                    # Run async activity analysis in a background thread
                     face_crop = unknown_face_crops[face_id]
-                    asyncio.create_task(
-                        analyze_unknown_activity(face_id, face_crop, coords, time.time())
-                    )
+                    _fid, _crop, _coords, _ts = face_id, face_crop.copy(), coords, time.time()
+                    threading.Thread(
+                        target=lambda fi=_fid, fc=_crop, co=_coords, ts=_ts: asyncio.run(
+                            analyze_unknown_activity(fi, fc, co, ts)
+                        ),
+                        daemon=True
+                    ).start()
                     activity_processing.add(face_id)
                     
                     # Clean up old crops
