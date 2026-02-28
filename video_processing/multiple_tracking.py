@@ -19,8 +19,7 @@ FACE_DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "face_db"
 VERIFICATION_MODEL = "Facenet512"
 DISTANCE_METRIC = "euclidean_l2"
 SIMILARITY_THRESHOLD = 0.68  # Optimized for Facenet512 L2
-COSINE_MATCH_THRESHOLD = 0.38  # Tighter = fewer false positives
-MIN_MATCH_MARGIN = 0.05        # Best match must beat 2nd-best by this much
+COSINE_MATCH_THRESHOLD = 0.50
 VERIFICATION_FREQ = 10      # Re-verify more often so votes accumulate faster
 VOTE_HISTORY_SIZE = 7       # Rolling window of results to vote over
 MAX_WORKERS = 1  # Must be 1: TensorFlow/Keras is NOT thread-safe for concurrent inference
@@ -46,8 +45,7 @@ def download_dnn_model():
 def detect_faces_dnn(frame, net):
     """Detect faces using OpenCV's DNN SSD model. Works with hats, glasses, angles."""
     h, w = frame.shape[:2]
-    # Larger blob (600x600) improves detection of small/distant faces
-    blob = cv2.dnn.blobFromImage(frame, 1.0, (600, 600), (104.0, 177.0, 123.0))
+    blob = cv2.dnn.blobFromImage(frame, 1.0, (300, 300), (104.0, 177.0, 123.0))
     net.setInput(blob)
     detections = net.forward()
 
@@ -58,7 +56,7 @@ def detect_faces_dnn(frame, net):
             box = detections[0, 0, i, 3:7] * np.array([w, h, w, h])
             x1, y1, x2, y2 = box.astype(int)
             bw, bh = x2 - x1, y2 - y1
-            if bw > 15 and bh > 15:  # Lowered from 30 to catch distant/small faces
+            if bw > 30 and bh > 30:
                 boxes.append((x1, y1, bw, bh))
     return boxes
 
@@ -149,43 +147,31 @@ class FaceTracker:
 
     def update(self, current_boxes):
         new_tracking = {}
-
-        # Build all candidate pairs (dist, box_index, face_id) within threshold
-        MAX_DIST = 80
-        candidates = []
-        for bi, box in enumerate(current_boxes):
+        for box in current_boxes:
+            box_tuple = tuple(box)
             curr_center = np.array([box[0] + box[2]/2, box[1] + box[3]/2])
+            
+            best_id = None
+            min_dist = 80 
+
             for face_id, data in self.tracked_faces.items():
                 prev_box = data["box"]
                 prev_center = np.array([prev_box[0] + prev_box[2]/2, prev_box[1] + prev_box[3]/2])
                 dist = np.linalg.norm(curr_center - prev_center)
-                if dist < MAX_DIST:
-                    candidates.append((dist, bi, face_id))
+                if dist < min_dist:
+                    min_dist = dist
+                    best_id = face_id
 
-        # Greedy one-to-one assignment: closest pairs first.
-        # Each box and each tracked ID can only be matched once,
-        # preventing multiple distant faces from stealing the same ID.
-        candidates.sort()
-        assigned_boxes = set()
-        assigned_ids = set()
-        for dist, bi, face_id in candidates:
-            if bi in assigned_boxes or face_id in assigned_ids:
-                continue
-            box = current_boxes[bi]
-            new_tracking[face_id] = {
-                "box": tuple(box),
-                "name": self.tracked_faces[face_id]["name"],
-                "last_verified": self.tracked_faces[face_id].get("last_verified", 0),
-                "history": self.tracked_faces[face_id].get("history", deque(maxlen=VOTE_HISTORY_SIZE)),
-            }
-            assigned_boxes.add(bi)
-            assigned_ids.add(face_id)
-
-        # Any unmatched boxes are new people entering the frame
-        for bi, box in enumerate(current_boxes):
-            if bi not in assigned_boxes:
+            if best_id is not None:
+                new_tracking[best_id] = {
+                    "box": box_tuple, 
+                    "name": self.tracked_faces[best_id]["name"],
+                    "last_verified": self.tracked_faces[best_id].get("last_verified", 0),
+                    "history": self.tracked_faces[best_id].get("history", deque(maxlen=VOTE_HISTORY_SIZE)),
+                }
+            else:
                 new_tracking[self.next_id] = {
-                    "box": tuple(box),
+                    "box": box_tuple,
                     "name": "Scanning...",
                     "last_verified": 0,
                     "history": deque(maxlen=VOTE_HISTORY_SIZE),
@@ -225,8 +211,7 @@ def identify_face(face_crop):
         
         live_vec = np.array(live_res[0]["embedding"])
         best_name = "Unknown"
-        best_dist = COSINE_MATCH_THRESHOLD
-        second_dist = float('inf')
+        min_dist = COSINE_MATCH_THRESHOLD
 
         for ref in REFERENCE_DATA:
             dot_product = np.dot(ref["embedding"], live_vec)
@@ -234,17 +219,10 @@ def identify_face(face_crop):
             norm_b = np.linalg.norm(live_vec)
             cosine_dist = 1 - (dot_product / (norm_a * norm_b))
 
-            if cosine_dist < best_dist:
-                second_dist = best_dist
-                best_dist = cosine_dist
-                best_name = ref["name"].split('_')[0]
-            elif cosine_dist < second_dist:
-                second_dist = cosine_dist
-
-        # Reject if the margin over the 2nd-best is too small (ambiguous match)
-        if best_name != "Unknown" and (second_dist - best_dist) < MIN_MATCH_MARGIN:
-            best_name = "Unknown"
-
+            if cosine_dist < min_dist:
+                min_dist = cosine_dist
+                best_name = ref["name"].split('_')[0] 
+        
         return best_name
     except Exception as e:
         print(f"ID Error: {e}")
@@ -296,11 +274,6 @@ def main():
     for _ in range(MAX_WORKERS):
         t = threading.Thread(target=face_worker, args=(task_queue, result_queue), daemon=True)
         t.start()
-
-    # Setup fullscreen window
-    window_name = "CUHackit High-Speed Recognition"
-    cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
-    cv2.setWindowProperty(window_name, cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
 
     frame_count = 0
 
@@ -359,7 +332,7 @@ def main():
             cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
             cv2.putText(frame, name, (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2)
 
-        cv2.imshow(window_name, frame)
+        cv2.imshow("CUHackit High-Speed Recognition", frame)
         
         # 6. Periodic Memory Cleanup
         if frame_count % 300 == 0:
