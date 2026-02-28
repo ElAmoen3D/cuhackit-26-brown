@@ -277,8 +277,7 @@ onUnmounted(() => {
                 <p>STREAM OFFLINE</p>
                 <button @click="streamError = false">↺ Retry</button>
               </div>
-              <div class="cam-scanlines" />
-              <div class="cam-corners"><span class="cc tl"/><span class="cc tr"/><span class="cc bl"/><span class="cc br"/></div>
+
             </div>
             <div class="cam-footer">
               <span class="cam-ts">Updated {{ lastUpdate }}</span>
@@ -811,25 +810,7 @@ onUnmounted(() => {
   inset: 0;
   display: block;
 }
-.cam-scanlines {
-  position: absolute; inset: 0;
-  background-image: repeating-linear-gradient(
-    0deg, rgba(0,0,0,0.07) 0px, rgba(0,0,0,0.07) 1px, transparent 1px, transparent 3px
-  );
-  pointer-events: none;
-  z-index: 3;
-}
-.cam-corners { position: absolute; inset: 0; pointer-events: none; z-index: 4; }
-.cc {
-  position: absolute;
-  width: 14px; height: 14px;
-  border-style: solid;
-  border-color: rgba(220,38,38,0.5);
-}
-.cc.tl { top: 10px;    left: 10px;    border-width: 2px 0 0 2px; }
-.cc.tr { top: 10px;    right: 10px;   border-width: 2px 2px 0 0; }
-.cc.bl { bottom: 10px; left: 10px;    border-width: 0 0 2px 2px; }
-.cc.br { bottom: 10px; right: 10px;   border-width: 0 2px 2px 0; }
+
 
 .cam-placeholder {
   flex-direction: column;
@@ -1151,14 +1132,6 @@ onUnmounted(() => {
 .bl { bottom: 12px; left: 12px;    border-width: 0 0 2px 2px; }
 .br { bottom: 12px; right: 12px;   border-width: 0 2px 2px 0; }
 
-.scanlines {
-  position: absolute; inset: 0;
-  background-image: repeating-linear-gradient(
-    0deg, rgba(0,0,0,0.06) 0px, rgba(0,0,0,0.06) 1px, transparent 1px, transparent 3px
-  );
-  pointer-events: none;
-  z-index: 4;
-}
 
 .offline-overlay {
   display: flex;
