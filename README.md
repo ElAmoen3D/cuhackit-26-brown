@@ -1,4 +1,4 @@
-# SecureView — Local Setup Guide
+# Tiger-Security — Local Setup Guide
 
 A real-time face recognition and activity monitoring system with a Vue.js dashboard.
 
