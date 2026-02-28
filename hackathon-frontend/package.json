@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently \"npm run start-backend\" \"vite\"",
+    "start-backend": "cd ../video_processing/camera_backend && npm install && node server.js",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -19,6 +20,7 @@
   "devDependencies": {
     "@types/vue-router": "^2.0.0",
     "@vitejs/plugin-vue": "^6.0.4",
+    "concurrently": "^9.2.1",
     "vite": "^7.3.1",
     "vite-plugin-vue-devtools": "^8.0.6"
   },

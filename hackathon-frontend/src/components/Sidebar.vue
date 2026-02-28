@@ -103,13 +103,13 @@ onUnmounted(() => {
 
 <style scoped>
 :root {
-  --soc-midnight: #0B0E14;
-  --soc-midnight-light: #161B22;
-  --soc-midnight-lighter: #21262D;
-  --soc-indigo: #6366F1;
-  --soc-indigo-bright: #818CF8;
-  --soc-text-primary: #E1E8ED;
-  --soc-border: #2D333B;
+  --soc-midnight: var(--tiger-bg);
+  --soc-midnight-light: var(--tiger-surface);
+  --soc-midnight-lighter: var(--tiger-surface-border);
+  --soc-indigo: var(--tiger-primary);
+  --soc-indigo-bright: var(--tiger-secondary);
+  --soc-text-primary: var(--tiger-text-base);
+  --soc-border: var(--tiger-surface-border);
 }
 
 .desktop-sidebar {
@@ -117,9 +117,9 @@ onUnmounted(() => {
   left: 0;
   top: 0;
   height: 100vh;
-  background: linear-gradient(180deg, #161B22 0%, #0B0E14 100%);
-  border-right: 2px solid #6366F1;
-  box-shadow: inset -8px 0 32px rgba(99, 102, 241, 0.08), -4px 0 16px rgba(0, 0, 0, 0.5);
+  background: var(--tiger-surface);
+  border-right: 1px solid var(--tiger-surface-border);
+  box-shadow: 4px 0 15px rgba(0, 0, 0, 0.03);
   overflow-y: auto;
   transition: width 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), left 0.4s ease, right 0.4s ease;
   z-index: 10;
@@ -133,8 +133,8 @@ onUnmounted(() => {
   left: auto;
   right: 0;
   border-right: none;
-  border-left: 2px solid #6366F1;
-  box-shadow: inset 8px 0 32px rgba(99, 102, 241, 0.08), 4px 0 16px rgba(0, 0, 0, 0.5);
+  border-left: 1px solid var(--tiger-surface-border);
+  box-shadow: -4px 0 15px rgba(0, 0, 0, 0.03);
 }
 
 .position-toggle-btn {

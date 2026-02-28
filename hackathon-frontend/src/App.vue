@@ -12,7 +12,7 @@
 
 html, body {
   height: 100%;
-  background: #0b0b0e;
+  background: var(--tiger-bg);
 }
 
 #app {
