@@ -5,6 +5,7 @@ import queue
 import gc
 import numpy as np
 import urllib.request
+from collections import deque, Counter
 
 try:
     from deepface import DeepFace
@@ -19,7 +20,8 @@ VERIFICATION_MODEL = "Facenet512"
 DISTANCE_METRIC = "euclidean_l2"
 SIMILARITY_THRESHOLD = 0.68  # Optimized for Facenet512 L2
 COSINE_MATCH_THRESHOLD = 0.50
-VERIFICATION_FREQ = 20
+VERIFICATION_FREQ = 10      # Re-verify more often so votes accumulate faster
+VOTE_HISTORY_SIZE = 7       # Rolling window of results to vote over
 MAX_WORKERS = 1  # Must be 1: TensorFlow/Keras is NOT thread-safe for concurrent inference
 
 # --- DNN Face Detector (much more robust than Haar with hats/glasses/angles) ---
@@ -57,6 +59,20 @@ def detect_faces_dnn(frame, net):
             if bw > 30 and bh > 30:
                 boxes.append((x1, y1, bw, bh))
     return boxes
+
+def normalize_face_lighting(img):
+    """Normalize lighting/saturation so embeddings are consistent across environments.
+    Applies CLAHE to luminance and desaturates slightly to remove warm-light bias."""
+    # Reduce saturation to remove warm/yellow color cast
+    hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV).astype(np.float32)
+    hsv[:, :, 1] *= 0.5
+    hsv[:, :, 1] = np.clip(hsv[:, :, 1], 0, 255)
+    img = cv2.cvtColor(hsv.astype(np.uint8), cv2.COLOR_HSV2BGR)
+    # CLAHE on luminance to flatten uneven lighting
+    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(4, 4))
+    lab[:, :, 0] = clahe.apply(lab[:, :, 0])
+    return cv2.cvtColor(lab, cv2.COLOR_LAB2BGR)
 
 # Global storage for pre-computed signatures
 REFERENCE_DATA = []
@@ -110,7 +126,12 @@ def precompute_db():
     for f in files:
         path = os.path.join(FACE_DB_DIR, f)
         try:
-            results = DeepFace.represent(img_path=path, model_name=VERIFICATION_MODEL, enforce_detection=True)
+            ref_img = cv2.imread(path)
+            if ref_img is None:
+                print(f"Skipping {f}: Could not read image.")
+                continue
+            ref_img = normalize_face_lighting(ref_img)
+            results = DeepFace.represent(img_path=ref_img, model_name=VERIFICATION_MODEL, enforce_detection=True)
             if results:
                 embedding = np.array(results[0]["embedding"])
                 REFERENCE_DATA.append({"name": f.split('.')[0], "embedding": embedding})
@@ -121,7 +142,7 @@ def precompute_db():
 
 class FaceTracker:
     def __init__(self):
-        self.tracked_faces = {} # { id: {"box": tuple, "name": str, "last_verified": int} }
+        self.tracked_faces = {} # { id: {"box", "name", "last_verified", "history"} }
         self.next_id = 0
 
     def update(self, current_boxes):
@@ -145,14 +166,30 @@ class FaceTracker:
                 new_tracking[best_id] = {
                     "box": box_tuple, 
                     "name": self.tracked_faces[best_id]["name"],
-                    "last_verified": self.tracked_faces[best_id].get("last_verified", 0)
+                    "last_verified": self.tracked_faces[best_id].get("last_verified", 0),
+                    "history": self.tracked_faces[best_id].get("history", deque(maxlen=VOTE_HISTORY_SIZE)),
                 }
             else:
-                new_tracking[self.next_id] = {"box": box_tuple, "name": "Scanning...", "last_verified": 0}
+                new_tracking[self.next_id] = {
+                    "box": box_tuple,
+                    "name": "Scanning...",
+                    "last_verified": 0,
+                    "history": deque(maxlen=VOTE_HISTORY_SIZE),
+                }
                 self.next_id += 1
 
         self.tracked_faces = new_tracking
         return self.tracked_faces
+
+    def apply_vote(self, face_id, raw_name):
+        """Add raw result to history and return the majority-voted name."""
+        if face_id not in self.tracked_faces:
+            return raw_name
+        history = self.tracked_faces[face_id]["history"]
+        history.append(raw_name)
+        # Majority vote; ties broken by most-recent
+        vote = Counter(history).most_common(1)[0][0]
+        return vote
 
 def identify_face(face_crop):
     try:
@@ -161,6 +198,7 @@ def identify_face(face_crop):
         if len(face_crop.shape) != 3 or face_crop.shape[0] < 10 or face_crop.shape[1] < 10:
             return "Unknown"
         
+        face_crop = normalize_face_lighting(face_crop)
         with MODEL_LOCK:
             live_res = DeepFace.represent(
                 img_path=face_crop, 
@@ -252,9 +290,10 @@ def main():
         # 3. Process AI Results from Background Workers
         while not result_queue.empty():
             try:
-                fid, name = result_queue.get_nowait()
+                fid, raw_name = result_queue.get_nowait()
                 if fid in tracked_people:
-                    tracked_people[fid]["name"] = name
+                    voted_name = tracker.apply_vote(fid, raw_name)
+                    tracked_people[fid]["name"] = voted_name
                 if fid in active_processing:
                     active_processing.remove(fid)
             except queue.Empty:
