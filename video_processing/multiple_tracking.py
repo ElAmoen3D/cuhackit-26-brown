@@ -1,3 +1,22 @@
+"""
+multiple_tracking.py — SecureView face recognition engine
+==========================================================
+
+Architecture
+------------
+  • OpenCV Haar cascade  → fast face *detection* every frame (lightweight)
+  • DeepFace Facenet512  → AI *identification* every N frames (heavyweight, threaded)
+  • FaceTracker          → stable identity assignment across frames by proximity
+  • ThreadedHTTPServer   → /video_feed (MJPEG), /data (JSON), /health
+  • ThreadPoolExecutor   → AI jobs run without blocking the video loop
+
+Startup
+-------
+  1.  Place face images in ./face_db/  (filename = person name, e.g. alice.jpg)
+  2.  python multiple_tracking.py
+  3.  node server.js  (proxies this server on port 5001 → Express on 8080)
+"""
+
 import os
 import cv2
 import threading
@@ -57,13 +76,16 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
 class APIHandler(BaseHTTPRequestHandler):
-    def log_message(self, *a): pass   # silence request logs
+
+    def log_message(self, *args) -> None:
+        pass
 
     def do_GET(self):
         # ── /video_feed  (MJPEG stream) ──
         if self.path == "/video_feed":
             self.send_response(200)
-            self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=FRAME")
+            self.send_header("Content-Type",  "multipart/x-mixed-replace; boundary=FRAME")
+            self.send_header("Cache-Control", "no-cache, no-store")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
             try:
@@ -86,20 +108,15 @@ class APIHandler(BaseHTTPRequestHandler):
                     "alerts":    list(alert_log),
                     "timestamp": time.time()
                 })
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.send_header("Cache-Control", "no-cache, no-store")
-            self.end_headers()
-            self.wfile.write(payload.encode())
+            self._send_json(payload)
 
         # ── /health ──
         elif self.path == "/health":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Access-Control-Allow-Origin", "*")
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "online", "identities": len(REFERENCE_DATA)}).encode())
+            self._send_json(json.dumps({
+                "status":     "online",
+                "identities": len(REFERENCE_DATA),
+                "timestamp":  time.time(),
+            }))
 
         else:
             self.send_response(404)
@@ -350,7 +367,8 @@ def main():
     # Start HTTP API
     server = ThreadedHTTPServer(("0.0.0.0", 5001), APIHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    print("API running at http://localhost:5001/data")
+    print(f"  API  →  http://localhost:{HTTP_PORT}/data")
+    print(f"  Feed →  http://localhost:{HTTP_PORT}/video_feed\n")
 
     # Load face detectors
     download_dnn_model()
@@ -432,14 +450,14 @@ def main():
             coords = {"x": int(x), "y": int(y), "w": int(w), "h": int(h), "center_x": cx, "center_y": cy}
 
             if name == "SCANNING...":
-                k_list.append({"name": "SCANNING...", "coords": coords})
                 color, label = (0, 220, 220), "SCANNING..."
+                k_list.append({"name": "SCANNING...", "coords": coords})
             elif name == "UNKNOWN":
-                u_list.append(coords)
                 color, label = (0, 0, 255), "UNKNOWN"
+                u_list.append(coords)
             else:
-                k_list.append({"name": name, "coords": coords})
                 color, label = (0, 255, 80), name
+                k_list.append({"name": name, "coords": coords})
 
             cv2.rectangle(frame, (x, y), (x+w, y+h), color, 2)
             (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.65, 2)
@@ -449,14 +467,13 @@ def main():
 
         # 6. Update HTTP Shared State
         with state_lock:
-            latest_known   = k_list
-            latest_unknown = u_list
-            latest_counts  = {
+            latest_known       = k_list
+            latest_unknown     = u_list
+            latest_counts      = {
                 "known":   len([p for p in k_list if p["name"] != "SCANNING..."]),
                 "unknown": len(u_list),
                 "total":   len(current_boxes)
             }
-            _, buf = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
             latest_frame_bytes = buf.tobytes()
 
         cv2.imshow("NEXUS — Face Recognition", frame)
