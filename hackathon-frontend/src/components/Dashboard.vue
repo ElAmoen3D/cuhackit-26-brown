@@ -206,6 +206,40 @@ async function uploadFaceDbFiles(files: File[]): Promise<void> {
   await fetchFaceDb()
 }
 
+// ── Enroll unknown face ─────────────────────────────────────────────────────
+const enrollingIds = ref<Set<string>>(new Set())
+const enrollResults = ref<Record<string, { ok: boolean; name?: string }>>({})
+
+async function enrollPerson(person: { id: string; coords: FaceCoords | null }): Promise<void> {
+  if (!person.coords) return
+  enrollingIds.value = new Set([...enrollingIds.value, person.id])
+  try {
+    const res = await fetch('/enroll', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        x: person.coords.x,
+        y: person.coords.y,
+        w: person.coords.w,
+        h: person.coords.h,
+      }),
+    })
+    const data = await res.json()
+    enrollResults.value = { ...enrollResults.value, [person.id]: { ok: !!data.success, name: data.name } }
+    setTimeout(() => {
+      const copy = { ...enrollResults.value }
+      delete copy[person.id]
+      enrollResults.value = copy
+    }, 4000)
+  } catch {
+    enrollResults.value = { ...enrollResults.value, [person.id]: { ok: false } }
+  } finally {
+    const s = new Set(enrollingIds.value)
+    s.delete(person.id)
+    enrollingIds.value = s
+  }
+}
+
 // ── Copilot AI Analysis ───────────────────────────────────────────────────────
 const showCopilotModal = ref(false)
 const copilotLoading   = ref(false)
@@ -482,6 +516,19 @@ onUnmounted(() => {
                   </div>
 
                   <button
+                    v-if="person.type === 'unknown'"
+                    class="ipl-enroll-btn"
+                    :disabled="enrollingIds.has(person.id)"
+                    title="Enroll this person"
+                    @click="enrollPerson(person)"
+                  >
+                    <span v-if="enrollingIds.has(person.id)">…</span>
+                    <span v-else-if="enrollResults[person.id]?.ok" style="color:#4ade80">✓</span>
+                    <span v-else-if="enrollResults[person.id] && !enrollResults[person.id].ok" style="color:#f87171">✗</span>
+                    <component v-else :is="UserPlus" :size="12" />
+                  </button>
+
+                  <button
                     class="ipl-ai-btn"
                     title="Analyze with Copilot"
                     @click="analyzWithCopilot(person)"
@@ -566,9 +613,17 @@ onUnmounted(() => {
                 </div>
 
                 <div class="detected-actions">
-                  <button v-if="person.type === 'unknown'" class="add-person-btn">
+                  <button
+                    v-if="person.type === 'unknown'"
+                    class="add-person-btn"
+                    :disabled="enrollingIds.has(person.id)"
+                    @click="enrollPerson(person)"
+                  >
                     <component :is="UserPlus" :size="14" />
-                    Enroll
+                    <span v-if="enrollingIds.has(person.id)">Enrolling…</span>
+                    <span v-else-if="enrollResults[person.id]?.ok" style="color:#4ade80">✓ Enrolled</span>
+                    <span v-else-if="enrollResults[person.id] && !enrollResults[person.id].ok" style="color:#f87171">Failed</span>
+                    <span v-else>Enroll</span>
                   </button>
                   <button
                     class="analyze-ai-btn"
@@ -1579,6 +1634,29 @@ onUnmounted(() => {
   background: rgba(59,130,246,0.18);
   border-color: rgba(59,130,246,0.45);
   color: #93c5fd;
+}
+
+.ipl-enroll-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px; height: 26px;
+  flex-shrink: 0;
+  background: rgba(34,197,94,0.07);
+  border: 1px solid rgba(34,197,94,0.25);
+  border-radius: 5px;
+  color: #4ade80;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-size: 11px;
+}
+.ipl-enroll-btn:hover {
+  background: rgba(34,197,94,0.18);
+  border-color: rgba(34,197,94,0.45);
+}
+.ipl-enroll-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .ipl-summary {
