@@ -26,6 +26,7 @@ import json
 import time
 import numpy as np
 import urllib.request
+import urllib.parse
 from collections import deque, Counter
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
@@ -48,6 +49,11 @@ VOTE_HISTORY_SIZE = 7        # Rolling window of results to vote over
 MAX_WORKERS = 1              # Must be 1: TensorFlow/Keras is NOT thread-safe for concurrent inference
 HTTP_PORT = 5001
 
+# ── Brightness Auto-Adjustment ────────────────────────────────────────────────
+# Set TARGET_BRIGHTNESS to a value 0–255 to automatically scale each frame so
+# its mean luminance matches that level.  Set to -1 to disable.
+TARGET_BRIGHTNESS = 128   # ← change this value to control target brightness
+
 # --- DNN Face Detector ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DNN_PROTOTXT_PATH = os.path.join(SCRIPT_DIR, "deploy.prototxt")
@@ -68,6 +74,7 @@ latest_known        = []
 latest_unknown      = []
 latest_counts       = {"known": 0, "unknown": 0, "total": 0}
 latest_frame_bytes  = None
+latest_frame_np     = None
 alert_log           = deque(maxlen=25)
 REFERENCE_DATA      = []
 MODEL_LOCK          = threading.Lock()
@@ -105,6 +112,7 @@ class APIHandler(BaseHTTPRequestHandler):
                         fb = latest_frame_bytes
                     if fb:
                         self.wfile.write(b"--FRAME\r\nContent-Type: image/jpeg\r\n\r\n" + fb + b"\r\n")
+                        self.wfile.flush()  # send immediately — prevents buffer buildup delay
                     time.sleep(0.033)   # ~30 fps
             except:
                 return
@@ -129,11 +137,58 @@ class APIHandler(BaseHTTPRequestHandler):
                 "timestamp":  time.time(),
             }))
 
+        # ── /face_crop?x=&y=&w=&h= ──
+        elif self.path.startswith("/face_crop"):
+            try:
+                qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                x  = int(qs.get("x", [0])[0])
+                y  = int(qs.get("y", [0])[0])
+                w  = int(qs.get("w", [0])[0])
+                h  = int(qs.get("h", [0])[0])
+                with state_lock:
+                    raw = latest_frame_np
+                if raw is None or w <= 0 or h <= 0:
+                    self.send_response(204); self.end_headers(); return
+                fh, fw = raw.shape[:2]
+                # add 20 % margin
+                mx, my = int(w * 0.20), int(h * 0.20)
+                x1 = max(0, x - mx);  y1 = max(0, y - my)
+                x2 = min(fw, x + w + mx); y2 = min(fh, y + h + my)
+                crop = raw[y1:y2, x1:x2]
+                if crop.size == 0:
+                    self.send_response(204); self.end_headers(); return
+                ok, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                if not ok:
+                    self.send_response(204); self.end_headers(); return
+                body = buf.tobytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Cache-Control", "no-cache, no-store")
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as e:
+                self.send_response(500); self.end_headers()
+
         else:
             self.send_response(404)
             self.end_headers()
 
 # ── Image Prep & Detection Models ──────────────────────────────────────────────
+def auto_adjust_brightness(frame):
+    """Scale frame so its mean brightness matches TARGET_BRIGHTNESS (0-255).
+    No-op when TARGET_BRIGHTNESS is -1 or the frame is pure black."""
+    if TARGET_BRIGHTNESS < 0:
+        return frame
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    current = float(np.mean(gray))
+    if current < 1.0:          # avoid divide-by-zero on a black frame
+        return frame
+    scale = TARGET_BRIGHTNESS / current
+    adjusted = np.clip(frame.astype(np.float32) * scale, 0, 255).astype(np.uint8)
+    return adjusted
+
 def sharpen_frame(frame):
     blurred = cv2.GaussianBlur(frame, (0, 0), 3.0)
     return cv2.addWeighted(frame, 1.5, blurred, -0.5, 0)
@@ -363,13 +418,17 @@ def open_camera():
         for backend_name, backend in [("CAP_DSHOW", cv2.CAP_DSHOW), ("CAP_MSMF", cv2.CAP_MSMF), ("DEFAULT", None)]:
             cap = cv2.VideoCapture(index, backend) if backend else cv2.VideoCapture(index)
             if cap.isOpened():
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                cap.set(cv2.CAP_PROP_FPS, 30)
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # minimize internal buffer lag
                 print(f"Opened webcam: index={index}, backend={backend_name}")
                 return cap
             cap.release()
     return None
 
 def main():
-    global latest_known, latest_unknown, latest_counts, latest_frame_bytes, alert_log
+    global latest_known, latest_unknown, latest_counts, latest_frame_bytes, latest_frame_np, alert_log
 
     if DeepFace is None:
         print(f"Error: DeepFace failed to import.\nDetails: {DEEPFACE_IMPORT_ERROR}\nFix: pip install tf-keras deepface")
@@ -380,8 +439,8 @@ def main():
     # Start HTTP API
     server = ThreadedHTTPServer(("0.0.0.0", HTTP_PORT), APIHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    print(f"  API  →  http://localhost:{HTTP_PORT}/data")
-    print(f"  Feed →  http://localhost:{HTTP_PORT}/video_feed\n")
+    print(f"  API  ->  http://localhost:{HTTP_PORT}/data")
+    print(f"  Feed ->  http://localhost:{HTTP_PORT}/video_feed\n")
 
     # Load face detectors
     download_dnn_model()
@@ -480,7 +539,8 @@ def main():
             cv2.putText(frame, f"({cx}, {cy})", (x, y+h+16), cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1)
 
         # 6. Update HTTP Shared State
-        _, buf = cv2.imencode(".jpg", frame)
+        frame = auto_adjust_brightness(frame)
+        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 82])
         with state_lock:
             latest_known       = k_list
             latest_unknown     = u_list
@@ -490,6 +550,7 @@ def main():
                 "total":   len(current_boxes)
             }
             latest_frame_bytes = buf.tobytes()
+            latest_frame_np    = frame.copy()
 
         cv2.imshow("NEXUS — Face Recognition", frame)
         

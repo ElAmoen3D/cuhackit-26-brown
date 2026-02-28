@@ -2,7 +2,7 @@
 /// <reference types="vite/client" />
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import {
-  Menu, X,
+  Menu, X, Trash2, Bot, Database, ImagePlus,
   LayoutDashboard, Monitor, ClipboardList, Settings,
   Eye, UserCheck, AlertTriangle, Clock,
   Activity, Wifi, WifiOff, UserPlus,
@@ -113,10 +113,119 @@ async function pollData(): Promise<void> {
 
     if (d.timestamp) {
       lastUpdate.value = new Date(d.timestamp * 1000).toLocaleTimeString('en-US', { hour12: false })
+      frameTs.value    = d.timestamp
     }
   } catch {
     errorCount.value++
     if (errorCount.value > 4) systemOnline.value = false
+  }
+}
+
+// ── People modal ─────────────────────────────────────────────────────────────
+const showPeopleModal = ref(false)
+const frameTs         = ref(0)
+
+function faceImgUrl(coords: FaceCoords | null): string {
+  if (!coords) return ''
+  const { x, y, w, h } = coords
+  return `/face_crop?x=${x}&y=${y}&w=${w}&h=${h}&t=${frameTs.value}`
+}
+
+const inDatabasePeople = computed(() =>
+  knownFaces.value
+    .filter(p => p.name !== 'SCANNING...')
+    .map((p, i) => ({ id: `k-${i}`, name: p.name, coords: p.coords }))
+)
+
+const notInDatabasePeople = computed(() =>
+  unknownFaces.value.map((u, i) => ({ id: `u-${i}`, coords: u }))
+)
+
+// ── Face Database Modal ───────────────────────────────────────────────────────
+interface FaceDbEntry { filename: string; name: string; dataUrl: string }
+
+const showFaceDbModal    = ref(false)
+const faceDbEntries      = ref<FaceDbEntry[]>([])
+const faceDbLoading      = ref(false)
+const faceDbDragOver     = ref(false)
+const faceDbUploadStatus = ref<string | null>(null)
+
+async function openFaceDb(): Promise<void> {
+  showFaceDbModal.value = true
+  await fetchFaceDb()
+}
+
+async function fetchFaceDb(): Promise<void> {
+  faceDbLoading.value = true
+  try {
+    const res = await fetch('/face_db', { cache: 'no-store' })
+    faceDbEntries.value = res.ok ? await res.json() : []
+  } catch {
+    faceDbEntries.value = []
+  } finally {
+    faceDbLoading.value = false
+  }
+}
+
+async function deleteFaceDbEntry(filename: string): Promise<void> {
+  await fetch(`/face_db/${encodeURIComponent(filename)}`, { method: 'DELETE' })
+  await fetchFaceDb()
+}
+
+function onFaceDbDragOver(e: DragEvent): void {
+  e.preventDefault()
+  faceDbDragOver.value = true
+}
+function onFaceDbDragLeave(): void { faceDbDragOver.value = false }
+
+async function onFaceDbDrop(e: DragEvent): Promise<void> {
+  e.preventDefault()
+  faceDbDragOver.value = false
+  const files = Array.from(e.dataTransfer?.files ?? []).filter(f => f.type.startsWith('image/'))
+  await uploadFaceDbFiles(files)
+}
+
+async function onFaceDbFileInput(e: Event): Promise<void> {
+  const files = Array.from((e.target as HTMLInputElement).files ?? []).filter(f => f.type.startsWith('image/'))
+  await uploadFaceDbFiles(files)
+}
+
+async function uploadFaceDbFiles(files: File[]): Promise<void> {
+  if (!files.length) return
+  faceDbUploadStatus.value = `Uploading ${files.length} file${files.length !== 1 ? 's' : ''}…`
+  const fd = new FormData()
+  files.forEach(f => fd.append('images', f, f.name))
+  await fetch('/face_db/upload', { method: 'POST', body: fd })
+  faceDbUploadStatus.value = null
+  await fetchFaceDb()
+}
+
+// ── Copilot AI Analysis ───────────────────────────────────────────────────────
+const showCopilotModal = ref(false)
+const copilotLoading   = ref(false)
+const copilotResult    = ref<string | null>(null)
+const copilotSubject   = ref<string>('')
+const copilotError     = ref<string | null>(null)
+
+async function analyzWithCopilot(person: { name: string; coords: FaceCoords | null }): Promise<void> {
+  copilotSubject.value   = person.name
+  copilotResult.value    = null
+  copilotError.value     = null
+  copilotLoading.value   = true
+  showCopilotModal.value = true
+  try {
+    const res = await fetch('/copilot/analyze', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ subject: person.name, coords: person.coords }),
+    })
+    const data = await res.json()
+    if (!res.ok || data.error) throw new Error(data.error ?? 'Request failed')
+    copilotResult.value = data.analysis
+  } catch (err: any) {
+    copilotError.value = err.message ?? 'Analysis failed'
+  } finally {
+    copilotLoading.value = false
   }
 }
 
@@ -161,7 +270,7 @@ onUnmounted(() => {
         <li :class="{ active: currentPage === 'dashboard' }" @click="currentPage = 'dashboard'; activeTab = 'live'" title="Dashboard">
           <component :is="LayoutDashboard" :size="20" />
         </li>
-        <li @click="currentPage = 'dashboard'; activeTab = 'live'" title="Live Feed">
+        <li @click="openFaceDb()" title="Face Database">
           <component :is="Camera" :size="20" />
         </li>
         <li @click="currentPage = 'dashboard'; activeTab = 'detected'" title="Detections">
@@ -203,7 +312,7 @@ onUnmounted(() => {
           <button class="hdr-icon-btn" title="Notifications">
             <component :is="Bell" :size="18" />
           </button>
-          <button class="hdr-icon-btn" title="Users">
+          <button class="hdr-icon-btn" title="Everyone" @click="showPeopleModal = true">
             <component :is="UserPlus" :size="18" />
           </button>
         </div>
@@ -303,20 +412,70 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <!-- CAM-03 placeholder -->
-          <div class="cam-card">
+          <!-- ── INLINE PEOPLE PANEL (replaces CAM-03) ──────── -->
+          <div class="cam-card people-inline-card">
             <div class="cam-header">
-              <span class="cam-name">Exit CAM-03</span>
-              <span class="cam-dot offline"></span>
+              <span class="cam-name">Detected · In Frame</span>
+              <span class="ipl-badge" :class="detectedPeople.length > 0 ? 'active' : ''">
+                {{ detectedPeople.length }}
+              </span>
             </div>
-            <div class="cam-body cam-placeholder">
-              <component :is="Camera" :size="32" class="cam-ph-icon" />
-              <span class="cam-ph-label">NOT CONNECTED</span>
+
+            <div class="ipl-body">
+              <!-- Empty state -->
+              <div v-if="detectedPeople.length === 0" class="ipl-empty">
+                <component :is="Eye" :size="30" />
+                <span>No faces in frame</span>
+              </div>
+
+              <!-- People list -->
+              <div v-else class="ipl-list">
+                <div
+                  v-for="person in detectedPeople"
+                  :key="person.id"
+                  :class="['ipl-item', person.type]"
+                >
+                  <!-- Face crop thumbnail -->
+                  <div :class="['ipl-avatar', person.type]">
+                    <img
+                      v-if="person.coords"
+                      :src="faceImgUrl(person.coords)"
+                      class="ipl-face-img"
+                      alt=""
+                      @error="(e: Event) => ((e.target as HTMLImageElement).style.display = 'none')"
+                    />
+                    <span class="ipl-avatar-letter">
+                      {{ person.type === 'unknown' ? '?' : person.type === 'scanning' ? '…' : person.name.charAt(0) }}
+                    </span>
+                  </div>
+
+                  <div class="ipl-info">
+                    <span class="ipl-name">{{ person.name }}</span>
+                    <span :class="['ipl-chip', person.type]">
+                      <span v-if="person.type === 'known'">✓ VERIFIED</span>
+                      <span v-else-if="person.type === 'scanning'">⟳ SCANNING</span>
+                      <span v-else>✗ UNKNOWN</span>
+                    </span>
+                  </div>
+
+                  <button
+                    class="ipl-ai-btn"
+                    title="Analyze with Copilot"
+                    @click="analyzWithCopilot(person)"
+                  >
+                    <component :is="Bot" :size="12" />
+                  </button>
+                </div>
+              </div>
             </div>
+
             <div class="cam-footer">
-              <span class="cam-ts">—</span>
-              <button class="cam-ctrl-btn">⏸</button>
-              <button class="cam-ctrl-btn">↺</button>
+              <span class="cam-ts">Updated {{ lastUpdate }}</span>
+              <span class="ipl-summary">
+                <span class="green">{{ counts.known }} id</span>
+                &nbsp;·&nbsp;
+                <span class="red">{{ counts.unknown }} unk</span>
+              </span>
             </div>
           </div>
         </div>
@@ -385,6 +544,14 @@ onUnmounted(() => {
                   <component :is="UserPlus" :size="14" />
                   Enroll
                 </button>
+                <button
+                  class="analyze-ai-btn"
+                  title="Analyze with Microsoft Copilot"
+                  @click="analyzWithCopilot(person)"
+                >
+                  <component :is="Bot" :size="14" />
+                  Analyze
+                </button>
               </div>
             </div>
           </div>
@@ -434,11 +601,383 @@ onUnmounted(() => {
 
       </div><!-- /page-body -->
     </main>
+
+    <!-- ── PEOPLE MODAL ─────────────────────────────────────────── -->
+    <Teleport to="body">
+      <div v-if="showPeopleModal" class="people-modal-backdrop" @click.self="showPeopleModal = false">
+        <div class="people-modal">
+          <div class="pm-header">
+            <h2>Everyone Detected</h2>
+            <button class="pm-close" @click="showPeopleModal = false">
+              <component :is="X" :size="18" />
+            </button>
+          </div>
+
+          <div class="pm-body">
+            <!-- In Database -->
+            <section class="pm-section">
+              <div class="pm-section-title in-db">
+                <component :is="UserCheck" :size="15" />
+                In Database
+                <span class="pm-count">{{ inDatabasePeople.length }}</span>
+              </div>
+              <div v-if="inDatabasePeople.length === 0" class="pm-empty">No recognised faces in frame</div>
+              <div v-else class="pm-list">
+                <div v-for="p in inDatabasePeople" :key="p.id" class="pm-item in-db">
+                  <div class="pm-avatar in-db">
+                    <img
+                      v-if="p.coords"
+                      :src="faceImgUrl(p.coords)"
+                      class="pm-face-img"
+                      alt=""
+                      @error="(e: Event) => ((e.target as HTMLImageElement).style.display = 'none')"
+                    />
+                    <span class="pm-avatar-letter">{{ p.name.charAt(0) }}</span>
+                  </div>
+                  <div class="pm-info">
+                    <span class="pm-name">{{ p.name }}</span>
+                    <span class="pm-badge in-db">✓ VERIFIED</span>
+                  </div>
+                  <span v-if="p.coords" class="pm-coords">{{ p.coords.w }}×{{ p.coords.h }}px</span>
+                </div>
+              </div>
+            </section>
+
+            <div class="pm-divider"></div>
+
+            <!-- Not in Database -->
+            <section class="pm-section">
+              <div class="pm-section-title not-db">
+                <component :is="AlertTriangle" :size="15" />
+                Not in Database
+                <span class="pm-count">{{ notInDatabasePeople.length }}</span>
+              </div>
+              <div v-if="notInDatabasePeople.length === 0" class="pm-empty">No unknown faces in frame</div>
+              <div v-else class="pm-list">
+                <div v-for="p in notInDatabasePeople" :key="p.id" class="pm-item not-db">
+                  <div class="pm-avatar not-db">
+                    <img
+                      v-if="p.coords"
+                      :src="faceImgUrl(p.coords)"
+                      class="pm-face-img"
+                      alt=""
+                      @error="(e: Event) => ((e.target as HTMLImageElement).style.display = 'none')"
+                    />
+                    <span class="pm-avatar-letter">?</span>
+                  </div>
+                  <div class="pm-info">
+                    <span class="pm-name">Unknown Person</span>
+                    <span class="pm-badge not-db">✗ UNRECOGNIZED</span>
+                  </div>
+                  <span v-if="p.coords" class="pm-coords">{{ p.coords.w }}×{{ p.coords.h }}px</span>
+                </div>
+              </div>
+            </section>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- ── FACE DATABASE MODAL ──────────────────────────────────── -->
+    <Teleport to="body">
+      <div v-if="showFaceDbModal" class="facedb-backdrop" @click.self="showFaceDbModal = false">
+        <div class="facedb-modal">
+          <div class="facedb-header">
+            <div class="facedb-title">
+              <component :is="Database" :size="16" />
+              Face Database
+              <span class="facedb-count">{{ faceDbEntries.length }}</span>
+            </div>
+            <button class="pm-close" @click="showFaceDbModal = false">
+              <component :is="X" :size="18" />
+            </button>
+          </div>
+
+          <div class="facedb-body">
+            <!-- Loading -->
+            <div v-if="faceDbLoading" class="facedb-loading">
+              <div class="facedb-spinner"></div>
+              <span>Loading database…</span>
+            </div>
+
+            <!-- Empty -->
+            <div v-else-if="!faceDbLoading && faceDbEntries.length === 0" class="facedb-empty">
+              <component :is="Database" :size="40" class="facedb-empty-icon" />
+              <p>No faces enrolled yet</p>
+              <p class="empty-sub">Drop photos below to add people</p>
+            </div>
+
+            <!-- Face grid -->
+            <div v-if="faceDbEntries.length > 0" class="facedb-grid">
+              <div
+                v-for="entry in faceDbEntries"
+                :key="entry.filename"
+                class="facedb-card"
+              >
+                <div class="facedb-img-wrap">
+                  <img :src="entry.dataUrl" :alt="entry.name" class="facedb-img" />
+                </div>
+                <div class="facedb-card-footer">
+                  <span class="facedb-name" :title="entry.filename">{{ entry.name }}</span>
+                  <button
+                    class="facedb-del-btn"
+                    :title="`Remove ${entry.name}`"
+                    @click="deleteFaceDbEntry(entry.filename)"
+                  >
+                    <component :is="Trash2" :size="12" />
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Drop zone -->
+            <div
+              :class="['facedb-dropzone', { 'drag-over': faceDbDragOver }]"
+              @dragover="onFaceDbDragOver"
+              @dragleave="onFaceDbDragLeave"
+              @drop="onFaceDbDrop"
+              @click="($refs.faceDbInput as HTMLInputElement).click()"
+            >
+              <component :is="ImagePlus" :size="22" />
+              <span v-if="!faceDbUploadStatus">Drop photos here or <u>click to browse</u></span>
+              <span v-else class="facedb-uploading">{{ faceDbUploadStatus }}</span>
+              <span class="facedb-hint">JPEG · PNG · WEBP — filename becomes the person's name</span>
+              <input
+                ref="faceDbInput"
+                type="file"
+                accept="image/*"
+                multiple
+                class="facedb-file-input"
+                @change="onFaceDbFileInput"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- ── COPILOT AI ANALYSIS MODAL ─────────────────────────────── -->
+    <Teleport to="body">
+      <div v-if="showCopilotModal" class="copilot-backdrop" @click.self="showCopilotModal = false">
+        <div class="copilot-modal">
+          <div class="copilot-header">
+            <div class="copilot-title-row">
+              <component :is="Bot" :size="18" class="copilot-bot-icon" />
+              <span class="copilot-title-text">AI Analysis</span>
+              <span class="copilot-brand">Microsoft Copilot</span>
+            </div>
+            <button class="pm-close" @click="showCopilotModal = false">
+              <component :is="X" :size="18" />
+            </button>
+          </div>
+
+          <div class="copilot-body">
+            <div class="copilot-subject-row">
+              <span class="copilot-subject-label">Subject</span>
+              <span :class="['copilot-subject-val', copilotSubject === 'Unknown Person' || !copilotSubject ? 'unknown' : 'known']">
+                {{ copilotSubject || 'Unknown' }}
+              </span>
+            </div>
+
+            <!-- Loading -->
+            <div v-if="copilotLoading" class="copilot-loading">
+              <div class="copilot-dots"><span></span><span></span><span></span></div>
+              <p class="copilot-loading-label">Analyzing footage with Microsoft Copilot…</p>
+            </div>
+
+            <!-- Error -->
+            <div v-else-if="copilotError" class="copilot-error">
+              <component :is="AlertTriangle" :size="18" />
+              <div>
+                <p class="copilot-err-title">Analysis Failed</p>
+                <p class="copilot-err-msg">{{ copilotError }}</p>
+              </div>
+            </div>
+
+            <!-- Result -->
+            <div v-else-if="copilotResult" class="copilot-result-wrap">
+              <p class="copilot-result-label">Behavioral Analysis Report</p>
+              <div class="copilot-result-text">{{ copilotResult }}</div>
+              <div class="copilot-timestamp">
+                Generated by Microsoft Copilot (Azure OpenAI)
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <style scoped>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+/* ── PEOPLE MODAL ────────────────────────────────────────────────────────── */
+.people-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(4px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.people-modal {
+  background: #131317;
+  border: 1px solid #2a2a32;
+  border-radius: 14px;
+  width: 440px;
+  max-width: 96vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.7);
+}
+
+.pm-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid #2a2a32;
+}
+
+.pm-header h2 {
+  font-size: 15px;
+  font-weight: 600;
+  color: #eeeef2;
+  letter-spacing: 0.01em;
+}
+
+.pm-close {
+  background: none;
+  border: none;
+  color: #8888a0;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  transition: color .15s, background .15s;
+}
+.pm-close:hover { color: #eeeef2; background: #232328; }
+
+.pm-body {
+  overflow-y: auto;
+  padding: 16px 20px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.pm-section { display: flex; flex-direction: column; gap: 8px; }
+
+.pm-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 0 2px;
+}
+.pm-section-title.in-db  { color: #22c55e; }
+.pm-section-title.not-db { color: #dc2626; }
+
+.pm-count {
+  margin-left: auto;
+  background: #232328;
+  border-radius: 20px;
+  padding: 1px 8px;
+  font-size: 11px;
+  color: #8888a0;
+  font-weight: 500;
+}
+
+.pm-divider {
+  border-top: 1px solid #2a2a32;
+  margin: 14px 0;
+}
+
+.pm-list { display: flex; flex-direction: column; gap: 6px; }
+
+.pm-empty {
+  font-size: 12px;
+  color: #45455a;
+  padding: 8px 0 4px;
+  font-style: italic;
+}
+
+.pm-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #1b1b20;
+  border: 1px solid #232328;
+}
+.pm-item.in-db  { border-left: 3px solid #22c55e; }
+.pm-item.not-db { border-left: 3px solid #dc2626; }
+
+.pm-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  font-weight: 700;
+  flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
+}
+.pm-avatar.in-db  { background: rgba(34,197,94,0.15); color: #22c55e; border: 1px solid rgba(34,197,94,0.3); }
+.pm-avatar.not-db { background: rgba(220,38,38,0.15);  color: #dc2626; border: 1px solid rgba(220,38,38,0.3); }
+
+.pm-face-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 7px;
+}
+
+.pm-avatar-letter {
+  position: relative;
+  z-index: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.pm-info { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
+
+.pm-name { font-size: 13px; font-weight: 600; color: #eeeef2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.pm-badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  padding: 1px 6px;
+  border-radius: 4px;
+  width: fit-content;
+}
+.pm-badge.in-db  { background: rgba(34,197,94,0.15); color: #22c55e; }
+.pm-badge.not-db { background: rgba(220,38,38,0.15);  color: #dc2626; }
+
+.pm-coords {
+  font-size: 10px;
+  color: #45455a;
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
 
 /* ── CSS VARIABLES ────────────────────────────────────────────────────────── */
 .app-shell {
@@ -762,9 +1301,10 @@ onUnmounted(() => {
 /* ── CAMERA GRID ──────────────────────────────────────────────────────────── */
 .camera-grid {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: 1fr 1fr 1fr;
   gap: 16px;
   flex-shrink: 0;
+  align-items: stretch;
 }
 .cam-card {
   background: var(--surface);
@@ -850,6 +1390,167 @@ onUnmounted(() => {
   cursor: pointer;
   font-family: var(--sans);
 }
+
+/* ── INLINE PEOPLE PANEL ─────────────────────────────────────────────────── */
+.people-inline-card {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.ipl-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  padding: 1px 7px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--surface-3);
+  color: var(--text-muted);
+  font-family: var(--mono);
+  transition: all 0.2s;
+}
+.ipl-badge.active {
+  background: var(--accent-dim);
+  color: var(--accent);
+  border: 1px solid var(--accent-line);
+}
+
+.ipl-body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  /* match the cam-body background */
+  background: #000;
+}
+
+.ipl-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-muted);
+  font-size: 12px;
+  opacity: 0.4;
+  padding: 24px;
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.ipl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 4px 0;
+}
+
+.ipl-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 10px;
+  border-bottom: 1px solid #111116;
+  transition: background 0.15s;
+  cursor: default;
+}
+.ipl-item:last-child { border-bottom: none; }
+.ipl-item:hover { background: #111116; }
+.ipl-item.known   { border-left: 2px solid var(--green); }
+.ipl-item.unknown { border-left: 2px solid var(--accent); }
+.ipl-item.scanning { border-left: 2px solid var(--amber); }
+
+.ipl-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  overflow: hidden;
+  position: relative;
+}
+.ipl-avatar.known    { background: rgba(34,197,94,0.15);  border: 1px solid rgba(34,197,94,0.3);   color: var(--green); }
+.ipl-avatar.unknown  { background: rgba(220,38,38,0.15);  border: 1px solid rgba(220,38,38,0.3);   color: var(--accent); }
+.ipl-avatar.scanning { background: rgba(245,158,11,0.15); border: 1px solid rgba(245,158,11,0.3);  color: var(--amber); }
+
+.ipl-face-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 5px;
+}
+.ipl-avatar-letter {
+  position: relative;
+  z-index: 0;
+}
+
+.ipl-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.ipl-name {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ipl-chip {
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 1px 6px;
+  border-radius: 3px;
+  width: fit-content;
+  font-family: var(--mono);
+  border: 1px solid;
+}
+.ipl-chip.known    { background: rgba(34,197,94,0.1);  color: var(--green);  border-color: rgba(34,197,94,0.25); }
+.ipl-chip.unknown  { background: rgba(220,38,38,0.1);  color: var(--accent); border-color: rgba(220,38,38,0.25); }
+.ipl-chip.scanning { background: rgba(245,158,11,0.1); color: var(--amber);  border-color: rgba(245,158,11,0.25); }
+
+.ipl-ai-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px; height: 26px;
+  flex-shrink: 0;
+  background: rgba(59,130,246,0.07);
+  border: 1px solid rgba(59,130,246,0.2);
+  border-radius: 5px;
+  color: #60a5fa;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.ipl-ai-btn:hover {
+  background: rgba(59,130,246,0.18);
+  border-color: rgba(59,130,246,0.45);
+  color: #93c5fd;
+}
+
+.ipl-summary {
+  font-size: 11px;
+  font-family: var(--mono);
+  margin-left: auto;
+}
+.ipl-summary .green { color: var(--green); font-weight: 600; }
+.ipl-summary .red   { color: var(--accent); font-weight: 600; }
 
 .cam-footer {
   display: flex;
@@ -1325,5 +2026,322 @@ tr:hover td { background: var(--surface-2); }
   .sysmetrics-row { grid-template-columns: 1fr; }
   .page-header  { padding: 14px 16px; }
   .page-body    { padding: 14px 12px; }
+}
+
+/* ── ANALYZE AI BUTTON ────────────────────────────────────────────────────── */
+.analyze-ai-btn {
+  display: flex; align-items: center; gap: 5px;
+  background: rgba(59,130,246,0.08);
+  color: #60a5fa;
+  border: 1px solid rgba(59,130,246,0.25);
+  padding: 6px 11px; border-radius: 5px;
+  font-family: var(--sans); font-size: 0.73rem; font-weight: 600;
+  cursor: pointer; flex-shrink: 0;
+  transition: all 0.18s ease;
+  margin-left: 4px;
+}
+.analyze-ai-btn:hover {
+  background: rgba(59,130,246,0.18);
+  border-color: rgba(59,130,246,0.5);
+  color: #93c5fd;
+}
+
+/* ── FACE DATABASE MODAL ─────────────────────────────────────────────────── */
+.facedb-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(4px);
+  z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.facedb-modal {
+  background: #131317;
+  border: 1px solid #2a2a32;
+  border-radius: 14px;
+  width: 620px;
+  max-width: 96vw;
+  max-height: 82vh;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.75);
+}
+
+.facedb-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px 14px;
+  border-bottom: 1px solid #2a2a32;
+  flex-shrink: 0;
+}
+
+.facedb-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px; font-weight: 600; color: #eeeef2;
+  letter-spacing: 0.01em;
+}
+
+.facedb-count {
+  background: #232328;
+  border-radius: 20px;
+  padding: 1px 9px;
+  font-size: 11px; color: #8888a0; font-weight: 500;
+}
+
+.facedb-body {
+  overflow-y: auto;
+  padding: 18px 18px 16px;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.facedb-loading {
+  display: flex; align-items: center; gap: 12px;
+  color: #8888a0; font-size: 13px;
+  justify-content: center; padding: 40px 0;
+}
+
+.facedb-spinner {
+  width: 20px; height: 20px;
+  border: 2px solid #2a2a32;
+  border-top-color: #dc2626;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.facedb-empty {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 10px; padding: 40px 0 10px;
+  color: var(--text-muted); text-align: center; font-size: 13px;
+}
+.facedb-empty-icon { opacity: 0.2; }
+
+.facedb-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.facedb-card {
+  background: #1b1b20;
+  border: 1px solid #232328;
+  border-radius: 9px;
+  overflow: hidden;
+  display: flex; flex-direction: column;
+  transition: border-color 0.17s;
+}
+.facedb-card:hover { border-color: #3a3a45; }
+
+.facedb-img-wrap {
+  aspect-ratio: 1;
+  background: #0d0d10;
+  overflow: hidden;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.facedb-img {
+  width: 100%; height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.facedb-card-footer {
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 9px;
+  border-top: 1px solid #232328;
+  min-width: 0;
+}
+
+.facedb-name {
+  font-size: 11.5px; font-weight: 600; color: #eeeef2;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  flex: 1;
+}
+
+.facedb-del-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; flex-shrink: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  color: #45455a; cursor: pointer;
+  transition: all 0.15s;
+}
+.facedb-del-btn:hover {
+  color: #dc2626;
+  background: rgba(220,38,38,0.1);
+  border-color: rgba(220,38,38,0.3);
+}
+
+.facedb-dropzone {
+  border: 1.5px dashed #2a2a32;
+  border-radius: 10px;
+  padding: 24px 16px;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  color: #8888a0; cursor: pointer; text-align: center;
+  font-size: 13px;
+  transition: all 0.2s ease;
+  position: relative;
+  flex-shrink: 0;
+}
+.facedb-dropzone:hover,
+.facedb-dropzone.drag-over {
+  border-color: #dc2626;
+  background: rgba(220,38,38,0.05);
+  color: #eeeef2;
+}
+.facedb-dropzone u { color: #60a5fa; text-decoration-color: rgba(96,165,250,0.5); }
+
+.facedb-hint {
+  font-size: 10px; color: #45455a;
+  font-family: var(--mono); letter-spacing: 0.04em;
+}
+.facedb-uploading {
+  color: #22c55e; font-weight: 600;
+}
+.facedb-file-input {
+  position: absolute; inset: 0;
+  opacity: 0; cursor: pointer;
+  width: 100%; height: 100%;
+  pointer-events: none;
+}
+
+/* ── COPILOT MODAL ───────────────────────────────────────────────────────── */
+.copilot-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(4px);
+  z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.copilot-modal {
+  background: #131317;
+  border: 1px solid #2a2a32;
+  border-radius: 14px;
+  width: 500px;
+  max-width: 96vw;
+  max-height: 80vh;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.75);
+}
+
+.copilot-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px 14px;
+  border-bottom: 1px solid #2a2a32;
+  flex-shrink: 0;
+  background: linear-gradient(90deg, rgba(59,130,246,0.07) 0%, transparent 100%);
+}
+
+.copilot-title-row {
+  display: flex; align-items: center; gap: 8px;
+}
+.copilot-bot-icon { color: #60a5fa; }
+.copilot-title-text {
+  font-size: 14px; font-weight: 600; color: #eeeef2;
+}
+.copilot-brand {
+  font-size: 10px; font-weight: 600;
+  color: #60a5fa;
+  background: rgba(59,130,246,0.1);
+  border: 1px solid rgba(59,130,246,0.25);
+  border-radius: 4px;
+  padding: 1px 7px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-family: var(--mono);
+}
+
+.copilot-body {
+  padding: 18px 20px 20px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex; flex-direction: column; gap: 16px;
+}
+
+.copilot-subject-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px;
+  background: #1b1b20;
+  border: 1px solid #232328;
+  border-radius: 8px;
+}
+.copilot-subject-label {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.1em; color: #45455a;
+  font-family: var(--mono);
+  flex-shrink: 0;
+}
+.copilot-subject-val {
+  font-size: 13px; font-weight: 600; color: #eeeef2;
+}
+.copilot-subject-val.unknown { color: #f87171; }
+.copilot-subject-val.known   { color: #4ade80; }
+
+.copilot-loading {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 16px; padding: 40px 0;
+}
+.copilot-dots {
+  display: flex; gap: 6px;
+}
+.copilot-dots span {
+  width: 8px; height: 8px;
+  background: #60a5fa;
+  border-radius: 50%;
+  animation: copilot-pulse 1.2s ease-in-out infinite;
+}
+.copilot-dots span:nth-child(2) { animation-delay: 0.2s; }
+.copilot-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes copilot-pulse {
+  0%, 100% { opacity: 0.25; transform: scale(0.8); }
+  50%       { opacity: 1;    transform: scale(1.1); }
+}
+.copilot-loading-label {
+  font-size: 12.5px; color: #8888a0;
+  text-align: center;
+}
+
+.copilot-error {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 14px 16px;
+  background: rgba(220,38,38,0.08);
+  border: 1px solid rgba(220,38,38,0.25);
+  border-radius: 8px;
+  color: #dc2626;
+}
+.copilot-err-title {
+  font-size: 13px; font-weight: 600; color: #f87171; margin-bottom: 4px;
+}
+.copilot-err-msg {
+  font-size: 12px; color: #8888a0; font-family: var(--mono);
+}
+
+.copilot-result-wrap {
+  display: flex; flex-direction: column; gap: 10px;
+}
+.copilot-result-label {
+  font-size: 10px; font-weight: 600; text-transform: uppercase;
+  letter-spacing: 0.1em; color: #45455a;
+  font-family: var(--mono);
+}
+.copilot-result-text {
+  background: #1b1b20;
+  border: 1px solid #232328;
+  border-left: 3px solid #3b82f6;
+  border-radius: 8px;
+  padding: 16px;
+  font-size: 13.5px; line-height: 1.65;
+  color: #d4d4e0;
+  white-space: pre-wrap;
+}
+.copilot-timestamp {
+  font-size: 10px; color: #45455a;
+  font-family: var(--mono);
+  text-align: right;
 }
 </style>
