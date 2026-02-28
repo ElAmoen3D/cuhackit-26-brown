@@ -45,11 +45,15 @@ async function fetchSuspiciousActivities() {
   try {
     isLoading.value = true
     const response = await fetch('/suspicious-activities')
-    
+    const ct = response.headers.get('content-type') ?? ''
+    if (!ct.includes('application/json')) {
+      // Server returned HTML (e.g. error page) — treat as offline
+      suspiciousActivities.value = []
+      return
+    }
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`)
     }
-    
     const data = await response.json()
     suspiciousActivities.value = data.activities || []
     totalSuspiciousCount.value = data.total_count || 0
@@ -66,6 +70,8 @@ async function getActivitySummary(faceId: string): Promise<ActivitySummary | nul
   try {
     const response = await fetch(`/activity-summary/${faceId}`)
     if (!response.ok) return null
+    const ct = response.headers.get('content-type') ?? ''
+    if (!ct.includes('application/json')) return null
     return await response.json()
   } catch (error) {
     console.error(`Failed to fetch activity summary for ${faceId}:`, error)
