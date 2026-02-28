@@ -36,17 +36,6 @@ onMounted(() => {
 
 <template>
   <div class="dashboard-container">
-    <!-- Sidebar Toggle Button -->
-    <button 
-      class="sidebar-toggle-btn"
-      @click="toggleSidebar"
-      title="Toggle sidebar"
-      :aria-label="sidebarOpen ? 'Close sidebar' : 'Open sidebar'"
-    >
-      <Menu v-if="sidebarOpen" :size="24" />
-      <X v-else :size="24" />
-    </button>
-
     <!-- Sidebar -->
     <aside class="sidebar" :class="{ 'sidebar-collapsed': !sidebarOpen }">
       <div class="logo">
@@ -60,6 +49,16 @@ onMounted(() => {
           <li>Settings</li>
         </ul>
       </nav>
+      <!-- Toggle Button at Bottom -->
+      <button 
+        class="sidebar-toggle-btn"
+        @click="toggleSidebar"
+        title="Toggle sidebar"
+        :aria-label="sidebarOpen ? 'Close sidebar' : 'Open sidebar'"
+      >
+        <Menu v-if="sidebarOpen" :size="20" />
+        <X v-else :size="20" />
+      </button>
     </aside>
 
     <!-- Main Content -->
@@ -157,6 +156,17 @@ onMounted(() => {
           </div>
         </div>
       </template>
+
+      <!-- Sidebar Uncollapse Button -->
+      <button 
+        v-if="!sidebarOpen"
+        class="sidebar-uncollapse-btn"
+        @click="toggleSidebar"
+        title="Open sidebar"
+        aria-label="Open sidebar"
+      >
+        <Menu :size="24" />
+      </button>
     </main>
   </div>
 </template>
@@ -245,9 +255,10 @@ onMounted(() => {
 
 /* Sidebar Toggle Button */
 .sidebar-toggle-btn {
-  position: fixed;
-  top: 20px;
-  left: 20px;
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(99, 102, 241, 0.05) 100%);
   border: 1px solid rgba(99, 102, 241, 0.4);
   color: #818CF8;
@@ -267,10 +278,42 @@ onMounted(() => {
   background: linear-gradient(135deg, rgba(99, 102, 241, 0.3) 0%, rgba(99, 102, 241, 0.15) 100%);
   border-color: rgba(99, 102, 241, 0.6);
   color: #E1E8ED;
-  transform: scale(1.1);
+  transform: translateX(-50%) scale(1.1);
 }
 
 .sidebar-toggle-btn:active {
+  transform: translateX(-50%) scale(0.95);
+}
+
+/* Sidebar Uncollapse Button */
+.sidebar-uncollapse-btn {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(99, 102, 241, 0.05) 100%);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  color: #818CF8;
+  cursor: pointer;
+  padding: 12px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  width: 50px;
+  height: 50px;
+  z-index: 99;
+}
+
+.sidebar-uncollapse-btn:hover {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3) 0%, rgba(99, 102, 241, 0.15) 100%);
+  border-color: rgba(99, 102, 241, 0.6);
+  color: #E1E8ED;
+  transform: scale(1.15);
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+}
+
+.sidebar-uncollapse-btn:active {
   transform: scale(0.95);
 }
 
