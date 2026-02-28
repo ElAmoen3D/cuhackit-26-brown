@@ -6,7 +6,7 @@ import {
   Menu, X, Trash2, Bot, Database, ImagePlus,
   LayoutDashboard, Monitor, ClipboardList, Settings,
   Eye, UserCheck, AlertTriangle, Clock,
-  Activity, Wifi, WifiOff, UserPlus,
+  Activity, Wifi, WifiOff, UserPlus, Users,
   Bell, Camera, Signal, Shield, BarChart2, Calendar, CloudUpload, Zap
 } from 'lucide-vue-next'
 import ActivityAnalyzer from './ActivityAnalyzer.vue'
@@ -311,13 +311,18 @@ onUnmounted(() => {
       <!-- Page header -->
       <header class="page-header">
         <div class="ph-left">
-          <h1>{{ currentPage === 'dashboard' ? 'Dashboard' : 'Access Logs' }}</h1>
-                    <p class="ph-sub">
+          <h1 v-if="currentPage === 'dashboard'">Dashboard</h1>
+          <h1 v-else-if="currentPage === 'logs'">Access Logs</h1>
+          <h1 v-else>Copilot Activity Analysis</h1>
+          <p class="ph-sub">
             <span v-if="isAuthenticated">Welcome back, <strong>{{ user.name }}</strong></span>
             <span v-else>Welcome back, <strong>SecureView</strong></span>
           </p>
         </div>
         <div class="ph-right">
+          <button @click="showPeopleModal = true" class="hdr-icon-btn everyone" title="Everyone">
+            <component :is="Users" :size="18" />
+          </button>
           <button class="hdr-icon-btn" title="Notifications">
             <component :is="Bell" :size="18" />
           </button>
@@ -1157,6 +1162,10 @@ onUnmounted(() => {
   transition: all 0.17s ease;
 }
 .hdr-icon-btn:hover { color: var(--text); background: var(--surface-3); }
+
+.everyone {
+  margin-right: 8px;
+}
 
 /* ── PAGE BODY (scrollable) ───────────────────────────────────────────────── */
 .page-body {
@@ -2076,7 +2085,6 @@ tr:hover td { background: var(--surface-2); }
   padding: 6px 11px; border-radius: 5px;
   font-family: var(--sans); font-size: 0.73rem; font-weight: 600;
   cursor: pointer; flex-shrink: 0;
-  transition: all 0.18s ease;
   margin-left: 4px;
 }
 .analyze-ai-btn:hover {
