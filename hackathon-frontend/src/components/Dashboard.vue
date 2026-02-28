@@ -12,6 +12,8 @@ import {
 
 const { loginWithRedirect, logout, isAuthenticated, user, isLoading } = useAuth0();
 
+const logoutRedirectUri = import.meta.env.VITE_AUTH0_REDIRECT_URI;
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface FaceCoords {
   x: number; y: number; w: number; h: number
@@ -216,7 +218,7 @@ onUnmounted(() => {
           </div>
           <div v-else-if="isAuthenticated" style="display: flex; align-items: center; gap: 8px;">
             <img :src="user.picture" :alt="user.name" style="width: 34px; height: 34px; border-radius: 7px;" />
-            <button @click="logout({ logoutParams: { returnTo: window.location.origin }})" class="hdr-icon-btn" title="Logout">
+            <button @click="logout({ logoutParams: { returnTo: logoutRedirectUri }})" class="hdr-icon-btn" title="Logout">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
             </button>
           </div>
