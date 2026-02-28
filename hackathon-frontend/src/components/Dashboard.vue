@@ -1,8 +1,10 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
+import { ChevronLeft, ChevronRight } from 'lucide-vue-next'
 
 const activeTab = ref('live')
 const currentPage = ref('dashboard') // 'dashboard' or 'logs'
+const sidebarPosition = ref('left')
 
 const people = ref([
   { id: 1, name: 'Alice Johnson', status: 'Authorized', time: '10:42 AM' },
@@ -17,12 +19,35 @@ const detectedPeople = ref([
   { id: 102, name: 'Unknown', type: 'unknown', match: '-' },
   { id: 103, name: 'Evan Wright', type: 'known', match: '92%' },
 ])
+
+const toggleSidebarPosition = () => {
+  sidebarPosition.value = sidebarPosition.value === 'left' ? 'right' : 'left'
+  localStorage.setItem('sidebarPosition', sidebarPosition.value)
+}
+
+onMounted(() => {
+  // Load sidebar position from localStorage
+  const savedPosition = localStorage.getItem('sidebarPosition')
+  if (savedPosition) {
+    sidebarPosition.value = savedPosition
+  }
+})
 </script>
 
 <template>
   <div class="dashboard-container">
     <!-- Sidebar -->
-    <aside class="sidebar">
+    <aside class="sidebar" :class="{ 'sidebar-right': sidebarPosition === 'right' }">
+      <button 
+        class="position-toggle-btn"
+        @click="toggleSidebarPosition"
+        title="Toggle sidebar position"
+        :aria-label="sidebarPosition === 'left' ? 'Move sidebar to right' : 'Move sidebar to left'"
+      >
+        <ChevronLeft v-if="sidebarPosition === 'right'" :size="18" />
+        <ChevronRight v-else :size="18" />
+      </button>
+      
       <div class="logo">
         <h2>SecureView</h2>
       </div>
@@ -229,6 +254,45 @@ const detectedPeople = ref([
   box-shadow: inset -8px 0 32px rgba(99, 102, 241, 0.08), -4px 0 16px rgba(0, 0, 0, 0.5);
   position: relative;
   z-index: 10;
+  transition: border 0.4s ease, box-shadow 0.4s ease, order 0.4s ease;
+}
+
+.sidebar.sidebar-right {
+  border-right: none;
+  border-left: 2px solid var(--soc-indigo);
+  box-shadow: inset 8px 0 32px rgba(99, 102, 241, 0.08), 4px 0 16px rgba(0, 0, 0, 0.5);
+  order: 2;
+}
+
+/* Position toggle button */
+.position-toggle-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  background: rgba(99, 102, 241, 0.1);
+  border: 1px solid rgba(99, 102, 241, 0.3);
+  color: #818CF8;
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  width: 36px;
+  height: 36px;
+  z-index: 11;
+}
+
+.position-toggle-btn:hover {
+  background: rgba(99, 102, 241, 0.2);
+  border-color: rgba(99, 102, 241, 0.5);
+  color: #E1E8ED;
+  transform: scale(1.1);
+}
+
+.position-toggle-btn:active {
+  transform: scale(0.95);
 }
 
 /* Sidebar animated accent line */
