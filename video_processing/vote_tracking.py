@@ -111,9 +111,34 @@ def identify_face(face_crop, is_locked=False):
         return best_name
     except: return "Unknown"
 
+def open_camera():
+    indices = [0, 1, 2]
+    backends = [
+        ("CAP_DSHOW", cv2.CAP_DSHOW),
+        ("CAP_MSMF", cv2.CAP_MSMF),
+        ("DEFAULT", None),
+    ]
+
+    for index in indices:
+        for backend_name, backend in backends:
+            if backend is None:
+                cap = cv2.VideoCapture(index)
+            else:
+                cap = cv2.VideoCapture(index, backend)
+
+            if cap.isOpened():
+                print(f"Opened webcam: index={index}, backend={backend_name}")
+                return cap
+
+            cap.release()
+    return None
+
 def main():
     precompute_db()
-    cap = cv2.VideoCapture(0) # Changed to 0 for default webcam
+    cap = open_camera()
+    if cap is None:
+        print("Failed to open any camera.")
+        return
     tracker = FaceTracker()
     executor = ThreadPoolExecutor(max_workers=MAX_WORKERS)
     pending_jobs = {} 
