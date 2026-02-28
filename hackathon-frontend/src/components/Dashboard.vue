@@ -206,6 +206,12 @@ async function uploadFaceDbFiles(files: File[]): Promise<void> {
   await fetchFaceDb()
 }
 
+// ── Additional Modal States ──────────────────────────────────
+const showSystemMonitor = ref(false)
+const showPerformance = ref(false)
+const showSecuritySettings = ref(false)
+const showSettings = ref(false)
+
 // ── Copilot AI Analysis ───────────────────────────────────────────────────────
 const showCopilotModal = ref(false)
 const copilotLoading   = ref(false)
@@ -269,38 +275,39 @@ onUnmounted(() => {
     <!-- ── NARROW ICON SIDEBAR ──────────────────────────────────── -->
     <nav class="icon-sidebar">
       <div class="sidebar-brand">
-        <div class="brand-mark">S</div>
+        <div class="brand-mark">CUHACKIT</div>
       </div>
 
       <ul class="nav-icons">
-        <li :class="{ active: currentPage === 'dashboard' }" @click="currentPage = 'dashboard'; activeTab = 'live'" title="Dashboard">
+        <li :class="{ active: currentPage === 'dashboard' }" @click="currentPage = 'dashboard'; activeTab = 'live'" title="Live Dashboard">
           <component :is="LayoutDashboard" :size="20" />
         </li>
         <li @click="openFaceDb()" title="Face Database">
           <component :is="Camera" :size="20" />
         </li>
-        <li @click="currentPage = 'dashboard'; activeTab = 'detected'" title="Detections">
+        <li @click="currentPage = 'dashboard'; activeTab = 'detected'" title="Detected Persons">
           <component :is="Eye" :size="20" />
         </li>
         <li :class="{ active: currentPage === 'logs' }" @click="currentPage = 'logs'" title="Access Logs">
           <component :is="ClipboardList" :size="20" />
         </li>
-        <li :class="{ active: currentPage === 'activity' }" @click="currentPage = 'activity'" title="Copilot Activity Analysis">
+        <li :class="{ active: currentPage === 'activity' }" @click="currentPage = 'activity'" title="AI Activity Analysis">
           <component :is="Zap" :size="20" />
         </li>
-        <li title="Signals">
+        <li class="nav-divider"></li>
+        <li @click="showSystemMonitor = true" title="System Status">
           <component :is="Signal" :size="20" />
         </li>
-        <li title="Monitor">
+        <li @click="showPerformance = true" title="Performance">
           <component :is="Monitor" :size="20" />
         </li>
-        <li title="Shield">
+        <li @click="showSecuritySettings = true" title="Security">
           <component :is="Shield" :size="20" />
         </li>
       </ul>
 
       <ul class="nav-icons nav-icons-bottom">
-        <li title="Settings">
+        <li @click="showSettings = true" title="Settings">
           <component :is="Settings" :size="20" />
         </li>
       </ul>
@@ -311,19 +318,19 @@ onUnmounted(() => {
       <!-- Page header -->
       <header class="page-header">
         <div class="ph-left">
-          <h1 v-if="currentPage === 'dashboard'">Dashboard</h1>
-          <h1 v-else-if="currentPage === 'logs'">Access Logs</h1>
-          <h1 v-else>Copilot Activity Analysis</h1>
+          <h1 v-if="currentPage === 'dashboard'">Live Surveillance Dashboard</h1>
+          <h1 v-else-if="currentPage === 'logs'">Access Control Logs</h1>
+          <h1 v-else>AI Threat Analysis</h1>
           <p class="ph-sub">
             <span v-if="isAuthenticated">Welcome back, <strong>{{ user.name }}</strong></span>
-            <span v-else>Welcome back, <strong>SecureView</strong></span>
+            <span v-else>Welcome back, <strong>CUHackit 2026</strong></span>
           </p>
         </div>
         <div class="ph-right">
-          <button @click="showPeopleModal = true" class="hdr-icon-btn everyone" title="Everyone">
+          <button @click="showPeopleModal = true" class="hdr-icon-btn everyone" title="View All Detected Persons">
             <component :is="Users" :size="18" />
           </button>
-          <button class="hdr-icon-btn" title="Notifications">
+          <button @click="showSystemMonitor = true" class="hdr-icon-btn" title="Notifications & Alerts">
             <component :is="Bell" :size="18" />
           </button>
           <div v-if="isLoading">
@@ -837,6 +844,227 @@ onUnmounted(() => {
         </div>
       </div>
     </Teleport>
+
+    <!-- ── SYSTEM MONITOR MODAL ─────────────────────────────── -->
+    <Teleport to="body">
+      <div v-if="showSystemMonitor" class="system-modal-backdrop" @click.self="showSystemMonitor = false">
+        <div class="system-modal">
+          <div class="system-header">
+            <div class="system-title">
+              <component :is="Signal" :size="18" class="copilot-bot-icon" />
+              <span>System Status</span>
+            </div>
+            <button class="pm-close" @click="showSystemMonitor = false">
+              <component :is="X" :size="18" />
+            </button>
+          </div>
+          <div class="system-body">
+            <div class="system-stat-item">
+              <div class="stat-left">
+                <div>
+                  <div class="stat-label">System Status</div>
+                  <div class="stat-label-sub">Overall health</div>
+                </div>
+              </div>
+              <div :class="['stat-value', systemOnline ? '' : '']">{{ systemOnline ? 'ONLINE' : 'OFFLINE' }}</div>
+            </div>
+            <div class="system-stat-item">
+              <div class="stat-left">
+                <div>
+                  <div class="stat-label">Total Detected</div>
+                  <div class="stat-label-sub">Current session</div>
+                </div>
+              </div>
+              <div class="stat-value">{{ counts.total }}</div>
+            </div>
+            <div class="system-stat-item">
+              <div class="stat-left">
+                <div>
+                  <div class="stat-label">Identified Faces</div>
+                  <div class="stat-label-sub">Verified in database</div>
+                </div>
+              </div>
+              <div style="color: #22c55e;" class="stat-value">{{ counts.known }}</div>
+            </div>
+            <div class="system-stat-item">
+              <div class="stat-left">
+                <div>
+                  <div class="stat-label">Unknown Persons</div>
+                  <div class="stat-label-sub">Requires verification</div>
+                </div>
+              </div>
+              <div style="color: #dc2626;" class="stat-value">{{ counts.unknown }}</div>
+            </div>
+            <div class="system-stat-item">
+              <div class="stat-left">
+                <div>
+                  <div class="stat-label">Last Update</div>
+                  <div class="stat-label-sub">System timestamp</div>
+                </div>
+              </div>
+              <div class="stat-value" style="font-size: 0.9rem; color: #8888a0;">{{ lastUpdate }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- ── PERFORMANCE MODAL ─────────────────────────────────── -->
+    <Teleport to="body">
+      <div v-if="showPerformance" class="system-modal-backdrop" @click.self="showPerformance = false">
+        <div class="system-modal">
+          <div class="system-header">
+            <div class="system-title">
+              <component :is="Monitor" :size="18" class="copilot-bot-icon" />
+              <span>Performance Metrics</span>
+            </div>
+            <button class="pm-close" @click="showPerformance = false">
+              <component :is="X" :size="18" />
+            </button>
+          </div>
+          <div class="system-body">
+            <div class="performance-grid">
+              <div class="perf-card">
+                <div class="perf-label">Frame Rate</div>
+                <div class="perf-value">30 FPS</div>
+              </div>
+              <div class="perf-card">
+                <div class="perf-label">CPU Usage</div>
+                <div class="perf-value">45%</div>
+              </div>
+              <div class="perf-card">
+                <div class="perf-label">Memory Usage</div>
+                <div class="perf-value">2.3 GB</div>
+              </div>
+              <div class="perf-card">
+                <div class="perf-label">Network</div>
+                <div class="perf-value">12 Mbps</div>
+              </div>
+            </div>
+            <div class="system-stat-item" style="margin-top: 8px;">
+              <div class="stat-left">
+                <div>
+                  <div class="stat-label">Processing Time (avg)</div>
+                  <div class="stat-label-sub">Per frame analysis</div>
+                </div>
+              </div>
+              <div class="stat-value" style="color: #3b82f6; font-size: 1.3rem;">45 ms</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- ── SECURITY SETTINGS MODAL ─────────────────────────────── -->
+    <Teleport to="body">
+      <div v-if="showSecuritySettings" class="system-modal-backdrop" @click.self="showSecuritySettings = false">
+        <div class="system-modal">
+          <div class="system-header">
+            <div class="system-title">
+              <component :is="Shield" :size="18" class="copilot-bot-icon" />
+              <span>Security Settings</span>
+            </div>
+            <button class="pm-close" @click="showSecuritySettings = false">
+              <component :is="X" :size="18" />
+            </button>
+          </div>
+          <div class="system-body">
+            <div class="security-checklist">
+              <div class="security-item active">
+                <div class="sec-check">✓</div>
+                <div class="sec-label">Face Recognition Active</div>
+              </div>
+              <div class="security-item active">
+                <div class="sec-check">✓</div>
+                <div class="sec-label">Live Threat Detection</div>
+              </div>
+              <div class="security-item active">
+                <div class="sec-check">✓</div>
+                <div class="sec-label">Activity Monitoring</div>
+              </div>
+              <div class="security-item active">
+                <div class="sec-check">✓</div>
+                <div class="sec-label">Cloud Sync Enabled</div>
+              </div>
+              <div class="security-item inactive">
+                <div class="sec-check">—</div>
+                <div class="sec-label">Two-Factor Authentication</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- ── SETTINGS MODAL ────────────────────────────────────────── -->
+    <Teleport to="body">
+      <div v-if="showSettings" class="system-modal-backdrop" @click.self="showSettings = false">
+        <div class="settings-modal">
+          <div class="settings-header">
+            <div class="system-title">
+              <component :is="Settings" :size="18" style="color: #60a5fa;" />
+              <span>System Settings</span>
+            </div>
+            <button class="pm-close" @click="showSettings = false">
+              <component :is="X" :size="18" />
+            </button>
+          </div>
+          <div class="settings-body">
+            <div class="settings-section">
+              <div class="settings-section-title">Video & Camera</div>
+              <div class="settings-item">
+                <div class="settings-item-left">
+                  <div class="settings-item-label">Record Stream</div>
+                  <div class="settings-item-desc">Save video feeds locally</div>
+                </div>
+                <div class="toggle-switch active"></div>
+              </div>
+              <div class="settings-item">
+                <div class="settings-item-left">
+                  <div class="settings-item-label">High Resolution</div>
+                  <div class="settings-item-desc">Capture at 4K quality</div>
+                </div>
+                <div class="toggle-switch"></div>
+              </div>
+            </div>
+            <div class="settings-section">
+              <div class="settings-section-title">Analysis & Detection</div>
+              <div class="settings-item">
+                <div class="settings-item-left">
+                  <div class="settings-item-label">AI Activity Analysis</div>
+                  <div class="settings-item-desc">Copilot threat detection</div>
+                </div>
+                <div class="toggle-switch active"></div>
+              </div>
+              <div class="settings-item">
+                <div class="settings-item-left">
+                  <div class="settings-item-label">Auto Alerts</div>
+                  <div class="settings-item-desc">Notify on suspicious activity</div>
+                </div>
+                <div class="toggle-switch active"></div>
+              </div>
+            </div>
+            <div class="settings-section">
+              <div class="settings-section-title">Privacy & Security</div>
+              <div class="settings-item">
+                <div class="settings-item-left">
+                  <div class="settings-item-label">Encryption</div>
+                  <div class="settings-item-desc">End-to-end encrypted storage</div>
+                </div>
+                <div class="toggle-switch active"></div>
+              </div>
+              <div class="settings-item">
+                <div class="settings-item-left">
+                  <div class="settings-item-label">Data Retention</div>
+                  <div class="settings-item-desc">30 days (auto delete old)</div>
+                </div>
+                <div class="toggle-switch active"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1069,16 +1297,18 @@ onUnmounted(() => {
   margin-bottom: 8px;
 }
 .brand-mark {
-  width: 32px; height: 32px;
-  background: var(--accent);
-  border-radius: 8px;
+  width: 38px; height: 38px;
+  background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+  border-radius: 10px;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 1rem;
-  font-weight: 800;
+  font-size: 0.55rem;
+  font-weight: 900;
   color: #fff;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.04em;
+  box-shadow: 0 8px 24px rgba(220,38,38,0.25);
+  border: 1px solid rgba(255,255,255,0.1);
 }
 
 .nav-icons {
@@ -1114,6 +1344,16 @@ onUnmounted(() => {
   background: var(--accent-dim);
   border-left-color: var(--accent);
 }
+.nav-icons li.nav-divider {
+  width: 24px;
+  height: 1px;
+  background: var(--border-soft);
+  border-radius: 0;
+  cursor: default;
+  margin: 4px 0;
+  pointer-events: none;
+  opacity: 0.5;
+}
 
 /* ── MAIN AREA ────────────────────────────────────────────────────────────── */
 .main-area {
@@ -1130,38 +1370,50 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 32px;
-  background: var(--surface);
+  padding: 24px 32px;
+  background: linear-gradient(135deg, #131317 0%, #1a1a21 50%, #131317 100%);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }
 .ph-left h1 {
-  font-size: 1.45rem;
-  font-weight: 700;
+  font-size: 1.55rem;
+  font-weight: 800;
   color: var(--text);
   letter-spacing: -0.02em;
   line-height: 1.1;
+  background: linear-gradient(135deg, #ffffff 0%, #d4d4e0 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
 }
 .ph-sub {
   font-size: 0.78rem;
   color: var(--text-dim);
-  margin-top: 3px;
+  margin-top: 6px;
+  letter-spacing: 0.01em;
 }
-.ph-sub strong { color: var(--text); font-weight: 600; }
-.ph-right { display: flex; align-items: center; gap: 8px; }
+.ph-sub strong { color: #60a5fa; font-weight: 700; }
+.ph-right { display: flex; align-items: center; gap: 10px; }
 .hdr-icon-btn {
-  width: 34px; height: 34px;
-  background: var(--surface-2);
-  border: 1px solid var(--border);
-  border-radius: 7px;
+  width: 38px; height: 38px;
+  background: rgba(19,19,23,0.5);
+  border: 1px solid rgba(58,58,66,0.6);
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-dim);
   cursor: pointer;
-  transition: all 0.17s ease;
+  transition: all 0.2s ease;
+  backdrop-filter: blur(8px);
 }
-.hdr-icon-btn:hover { color: var(--text); background: var(--surface-3); }
+.hdr-icon-btn:hover { 
+  color: var(--text);
+  background: rgba(35,35,40,0.7);
+  border-color: rgba(96,165,250,0.4);
+  box-shadow: 0 0 12px rgba(96,165,250,0.15);
+}
 
 .everyone {
   margin-right: 8px;
@@ -2390,5 +2642,190 @@ tr:hover td { background: var(--surface-2); }
   font-size: 10px; color: #45455a;
   font-family: var(--mono);
   text-align: right;
+}
+
+/* ── SYSTEM MONITOR MODAL ──────────────────────────────────── */
+.system-modal-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.65);
+  backdrop-filter: blur(4px);
+  z-index: 9999;
+  display: flex; align-items: center; justify-content: center;
+}
+
+.system-modal {
+  background: #131317;
+  border: 1px solid #2a2a32;
+  border-radius: 14px;
+  width: 500px;
+  max-width: 96vw;
+  max-height: 80vh;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.75);
+}
+
+.system-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px 14px;
+  border-bottom: 1px solid #2a2a32;
+  flex-shrink: 0;
+  background: linear-gradient(90deg, rgba(34,197,94,0.07) 0%, transparent 100%);
+}
+
+.system-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px; font-weight: 600; color: #eeeef2;
+}
+
+.system-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex; flex-direction: column; gap: 16px;
+}
+
+.system-stat-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 16px;
+  background: #1b1b20;
+  border: 1px solid #232328;
+  border-radius: 8px;
+  gap: 12px;
+}
+
+.stat-left { display: flex; align-items: center; gap: 10px; flex: 1; }
+.stat-label { font-size: 13px; font-weight: 600; color: #eeeef2; }
+.stat-label-sub { font-size: 11px; color: #45455a; margin-top: 2px; }
+.stat-value { font-size: 1.2rem; font-weight: 700; color: #22c55e; font-family: var(--mono); }
+.stat-unit { font-size: 10px; color: #8888a0; margin-left: 4px; }
+.stat-bar {
+  width: 100%;
+  height: 4px;
+  background: #232328;
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 6px;
+}
+.stat-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #22c55e 0%, #84cc16 50%, #eab308 100%);
+  border-radius: 2px;
+  transition: width 0.6s ease;
+}
+
+.performance-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
+}
+
+.perf-card {
+  padding: 14px 16px;
+  background: #1b1b20;
+  border: 1px solid #232328;
+  border-radius: 8px;
+  display: flex; flex-direction: column; gap: 8px;
+}
+
+.perf-label { font-size: 11px; font-weight: 600; color: #8888a0; text-transform: uppercase; letter-spacing: 0.08em; font-family: var(--mono); }
+.perf-value { font-size: 1.4rem; font-weight: 700; color: #3b82f6; font-family: var(--mono); }
+
+.security-checklist {
+  display: flex; flex-direction: column; gap: 10px;
+}
+
+.security-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+  background: #1b1b20;
+  border: 1px solid #232328;
+  border-left: 3px solid;
+  border-radius: 6px;
+}
+
+.security-item.active { border-left-color: #22c55e; background: rgba(34,197,94,0.08); }
+.security-item.inactive { border-left-color: #45455a; opacity: 0.7; }
+
+.sec-check { width: 20px; height: 20px; border-radius: 4px; display: flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; }
+.security-item.active .sec-check { background: rgba(34,197,94,0.2); color: #22c55e; }
+.security-item.inactive .sec-check { background: rgba(68,68,68,0.2); color: #45455a; }
+
+.sec-label { font-size: 13px; font-weight: 600; color: #eeeef2; }
+
+/* ── SETTINGS MODAL ────────────────────────────────────────── */
+.settings-modal {
+  background: #131317;
+  border: 1px solid #2a2a32;
+  border-radius: 14px;
+  width: 600px;
+  max-width: 96vw;
+  max-height: 85vh;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 24px 64px rgba(0,0,0,0.75);
+}
+
+.settings-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px 14px;
+  border-bottom: 1px solid #2a2a32;
+  flex-shrink: 0;
+  background: linear-gradient(90deg, rgba(59,130,246,0.07) 0%, transparent 100%);
+}
+
+.settings-body {
+  padding: 20px;
+  overflow-y: auto;
+  flex: 1;
+  display: flex; flex-direction: column; gap: 20px;
+}
+
+.settings-section {
+  display: flex; flex-direction: column; gap: 12px;
+}
+
+.settings-section-title {
+  font-size: 11px; font-weight: 700; color: #8888a0; text-transform: uppercase; letter-spacing: 0.12em; font-family: var(--mono);
+  padding-bottom: 8px; border-bottom: 1px solid #232328;
+}
+
+.settings-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 14px;
+  background: #1b1b20;
+  border: 1px solid #232328;
+  border-radius: 8px;
+  gap: 12px;
+}
+
+.settings-item-left { display: flex; flex-direction: column; gap: 4px; flex: 1; }
+.settings-item-label { font-size: 13px; font-weight: 600; color: #eeeef2; }
+.settings-item-desc { font-size: 11px; color: #45455a; }
+
+.toggle-switch {
+  width: 44px; height: 24px;
+  background: #232328;
+  border-radius: 12px;
+  border: 1px solid #3a3a42;
+  position: relative;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+}
+.toggle-switch.active {
+  background: #22c55e;
+  border-color: #16a34a;
+}
+.toggle-switch::after {
+  content: '';
+  position: absolute;
+  width: 20px; height: 20px;
+  background: white;
+  border-radius: 10px;
+  top: 2px; left: 2px;
+  transition: left 0.3s ease;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+}
+.toggle-switch.active::after {
+  left: 22px;
 }
 </style>
