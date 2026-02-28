@@ -1,8 +1,10 @@
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
+import { Menu, X } from 'lucide-vue-next'
 
 const activeTab = ref('live')
 const currentPage = ref('dashboard') // 'dashboard' or 'logs'
+const sidebarOpen = ref(true)
 
 const people = ref([
   { id: 1, name: 'Alice Johnson', status: 'Authorized', time: '10:42 AM' },
@@ -17,12 +19,25 @@ const detectedPeople = ref([
   { id: 102, name: 'Unknown', type: 'unknown', match: '-' },
   { id: 103, name: 'Evan Wright', type: 'known', match: '92%' },
 ])
+
+const toggleSidebar = () => {
+  sidebarOpen.value = !sidebarOpen.value
+  localStorage.setItem('sidebarOpen', sidebarOpen.value)
+}
+
+onMounted(() => {
+  // Load sidebar state from localStorage
+  const savedState = localStorage.getItem('sidebarOpen')
+  if (savedState !== null) {
+    sidebarOpen.value = savedState === 'true'
+  }
+})
 </script>
 
 <template>
   <div class="dashboard-container">
     <!-- Sidebar -->
-    <aside class="sidebar">
+    <aside class="sidebar" :class="{ 'sidebar-collapsed': !sidebarOpen }">
       <div class="logo">
         <h2>SecureView</h2>
       </div>
@@ -34,6 +49,16 @@ const detectedPeople = ref([
           <li>Settings</li>
         </ul>
       </nav>
+      <!-- Toggle Button at Bottom -->
+      <button 
+        class="sidebar-toggle-btn"
+        @click="toggleSidebar"
+        title="Toggle sidebar"
+        :aria-label="sidebarOpen ? 'Close sidebar' : 'Open sidebar'"
+      >
+        <Menu v-if="sidebarOpen" :size="20" />
+        <X v-else :size="20" />
+      </button>
     </aside>
 
     <!-- Main Content -->
@@ -131,6 +156,17 @@ const detectedPeople = ref([
           </div>
         </div>
       </template>
+
+      <!-- Sidebar Uncollapse Button -->
+      <button 
+        v-if="!sidebarOpen"
+        class="sidebar-uncollapse-btn"
+        @click="toggleSidebar"
+        title="Open sidebar"
+        aria-label="Open sidebar"
+      >
+        <Menu :size="24" />
+      </button>
     </main>
   </div>
 </template>
@@ -217,6 +253,70 @@ const detectedPeople = ref([
   50% { opacity: 1; }
 }
 
+/* Sidebar Toggle Button */
+.sidebar-toggle-btn {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(99, 102, 241, 0.05) 100%);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  color: #818CF8;
+  cursor: pointer;
+  padding: 10px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  width: 44px;
+  height: 44px;
+  z-index: 100;
+}
+
+.sidebar-toggle-btn:hover {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3) 0%, rgba(99, 102, 241, 0.15) 100%);
+  border-color: rgba(99, 102, 241, 0.6);
+  color: #E1E8ED;
+  transform: translateX(-50%) scale(1.1);
+}
+
+.sidebar-toggle-btn:active {
+  transform: translateX(-50%) scale(0.95);
+}
+
+/* Sidebar Uncollapse Button */
+.sidebar-uncollapse-btn {
+  position: fixed;
+  bottom: 30px;
+  right: 30px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2) 0%, rgba(99, 102, 241, 0.05) 100%);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  color: #818CF8;
+  cursor: pointer;
+  padding: 12px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.3s ease;
+  width: 50px;
+  height: 50px;
+  z-index: 99;
+}
+
+.sidebar-uncollapse-btn:hover {
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.3) 0%, rgba(99, 102, 241, 0.15) 100%);
+  border-color: rgba(99, 102, 241, 0.6);
+  color: #E1E8ED;
+  transform: scale(1.15);
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.3);
+}
+
+.sidebar-uncollapse-btn:active {
+  transform: scale(0.95);
+}
+
 /* Sidebar */
 .sidebar {
   width: 280px;
@@ -229,6 +329,15 @@ const detectedPeople = ref([
   box-shadow: inset -8px 0 32px rgba(99, 102, 241, 0.08), -4px 0 16px rgba(0, 0, 0, 0.5);
   position: relative;
   z-index: 10;
+  transition: width 0.3s ease, transform 0.3s ease, opacity 0.3s ease;
+}
+
+.sidebar.sidebar-collapsed {
+  width: 0;
+  transform: translateX(-100%);
+  opacity: 0;
+  pointer-events: none;
+  overflow: hidden;
 }
 
 /* Sidebar animated accent line */
@@ -427,16 +536,16 @@ const detectedPeople = ref([
 }
 
 .login-btn {
-  background: linear-gradient(135deg, var(--soc-indigo) 0%, var(--soc-indigo-dark) 100%);
+  background: linear-gradient(135deg, #a855f7 0%, #9333ea 100%);
   color: white;
-  border: 2px solid var(--soc-indigo-bright);
+  border: 2px solid #d8b4fe;
   padding: 12px 28px;
   border-radius: 6px;
   cursor: pointer;
   font-weight: 700;
   font-family: 'IBM Plex Mono', 'JetBrains Mono', monospace;
   transition: all 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-  box-shadow: 0 0 20px rgba(99, 102, 241, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.1);
+  box-shadow: 0 0 25px rgba(168, 85, 247, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.2);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   position: relative;
@@ -453,7 +562,7 @@ const detectedPeople = ref([
   left: -100%;
   width: 100%;
   height: 100%;
-  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.2) 50%, transparent 100%);
+  background: linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.3) 50%, transparent 100%);
   transition: left 0.5s ease;
 }
 
@@ -462,13 +571,13 @@ const detectedPeople = ref([
 }
 
 .login-btn:hover {
-  background: linear-gradient(135deg, var(--soc-indigo-bright) 0%, var(--soc-indigo) 100%);
-  box-shadow: 0 0 40px rgba(99, 102, 241, 0.8), inset 0 1px 0 rgba(255, 255, 255, 0.2), 0 0 20px rgba(99, 102, 241, 0.6);
+  background: linear-gradient(135deg, #c084fc 0%, #a855f7 100%);
+  box-shadow: 0 0 50px rgba(168, 85, 247, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 0 30px rgba(168, 85, 247, 0.8);
   transform: translateY(-2px);
 }
 
 .login-btn:active {
-  box-shadow: 0 0 20px rgba(99, 102, 241, 0.6), inset 0 2px 4px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 0 30px rgba(168, 85, 247, 0.7), inset 0 2px 4px rgba(0, 0, 0, 0.3);
   transform: translateY(0);
 }
 
