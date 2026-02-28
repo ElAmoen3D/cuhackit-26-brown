@@ -26,9 +26,11 @@ import json
 import time
 import numpy as np
 import urllib.request
+import urllib.parse
 from collections import deque, Counter
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from socketserver import ThreadingMixIn
+from typing import Dict, List, Tuple
 
 try:
     from deepface import DeepFace
@@ -36,6 +38,20 @@ try:
 except Exception as import_error:
     DeepFace = None
     DEEPFACE_IMPORT_ERROR = import_error
+
+try:
+    from copilot_analyzer import get_analyzer
+    COPILOT_AVAILABLE = True
+except ImportError:
+    COPILOT_AVAILABLE = False
+    logging.warning("Copilot analyzer not available - install httpx")
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - [TRACKER] - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 FACE_DB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "face_db")
@@ -47,6 +63,11 @@ VERIFICATION_FREQ = 10       # Re-verify more often so votes accumulate faster
 VOTE_HISTORY_SIZE = 7        # Rolling window of results to vote over
 MAX_WORKERS = 1              # Must be 1: TensorFlow/Keras is NOT thread-safe for concurrent inference
 HTTP_PORT = 5001
+
+# ── Brightness Auto-Adjustment ────────────────────────────────────────────────
+# Set TARGET_BRIGHTNESS to a value 0–255 to automatically scale each frame so
+# its mean luminance matches that level.  Set to -1 to disable.
+TARGET_BRIGHTNESS = 128   # ← change this value to control target brightness
 
 # --- DNN Face Detector ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -68,6 +89,7 @@ latest_known        = []
 latest_unknown      = []
 latest_counts       = {"known": 0, "unknown": 0, "total": 0}
 latest_frame_bytes  = None
+latest_frame_np     = None
 alert_log           = deque(maxlen=25)
 REFERENCE_DATA      = []
 MODEL_LOCK          = threading.Lock()
@@ -105,6 +127,7 @@ class APIHandler(BaseHTTPRequestHandler):
                         fb = latest_frame_bytes
                     if fb:
                         self.wfile.write(b"--FRAME\r\nContent-Type: image/jpeg\r\n\r\n" + fb + b"\r\n")
+                        self.wfile.flush()  # send immediately — prevents buffer buildup delay
                     time.sleep(0.033)   # ~30 fps
             except:
                 return
@@ -126,14 +149,63 @@ class APIHandler(BaseHTTPRequestHandler):
             self._send_json(json.dumps({
                 "status":     "online",
                 "identities": len(REFERENCE_DATA),
+                "copilot_enabled": activity_analysis_enabled,
+                "suspicious_activities": len(suspicious_activities_log),
                 "timestamp":  time.time(),
             }))
+
+        # ── /face_crop?x=&y=&w=&h= ──
+        elif self.path.startswith("/face_crop"):
+            try:
+                qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                x  = int(qs.get("x", [0])[0])
+                y  = int(qs.get("y", [0])[0])
+                w  = int(qs.get("w", [0])[0])
+                h  = int(qs.get("h", [0])[0])
+                with state_lock:
+                    raw = latest_frame_np
+                if raw is None or w <= 0 or h <= 0:
+                    self.send_response(204); self.end_headers(); return
+                fh, fw = raw.shape[:2]
+                # add 20 % margin
+                mx, my = int(w * 0.20), int(h * 0.20)
+                x1 = max(0, x - mx);  y1 = max(0, y - my)
+                x2 = min(fw, x + w + mx); y2 = min(fh, y + h + my)
+                crop = raw[y1:y2, x1:x2]
+                if crop.size == 0:
+                    self.send_response(204); self.end_headers(); return
+                ok, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 85])
+                if not ok:
+                    self.send_response(204); self.end_headers(); return
+                body = buf.tobytes()
+                self.send_response(200)
+                self.send_header("Content-Type", "image/jpeg")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Access-Control-Allow-Origin", "*")
+                self.send_header("Cache-Control", "no-cache, no-store")
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as e:
+                self.send_response(500); self.end_headers()
 
         else:
             self.send_response(404)
             self.end_headers()
 
 # ── Image Prep & Detection Models ──────────────────────────────────────────────
+def auto_adjust_brightness(frame):
+    """Scale frame so its mean brightness matches TARGET_BRIGHTNESS (0-255).
+    No-op when TARGET_BRIGHTNESS is -1 or the frame is pure black."""
+    if TARGET_BRIGHTNESS < 0:
+        return frame
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    current = float(np.mean(gray))
+    if current < 1.0:          # avoid divide-by-zero on a black frame
+        return frame
+    scale = TARGET_BRIGHTNESS / current
+    adjusted = np.clip(frame.astype(np.float32) * scale, 0, 255).astype(np.uint8)
+    return adjusted
+
 def sharpen_frame(frame):
     blurred = cv2.GaussianBlur(frame, (0, 0), 3.0)
     return cv2.addWeighted(frame, 1.5, blurred, -0.5, 0)
@@ -306,6 +378,54 @@ def identify_face(face_crop):
     except Exception:
         return "UNKNOWN"
 
+async def analyze_unknown_activity(face_id: str, face_crop, coordinates: Dict, frame_timestamp: float):
+    """
+    Analyze suspicious activity for unknown face using Copilot.
+    Runs asynchronously to avoid blocking video processing.
+    """
+    if not activity_analysis_enabled or not copilot_analyzer:
+        return
+    
+    try:
+        # Encode face crop to JPEG bytes
+        ret, jpeg_bytes = cv2.imencode('.jpg', face_crop)
+        if not ret:
+            return
+        
+        # Call Copilot analyzer
+        analysis = await copilot_analyzer.analyze_activity_async(
+            jpeg_bytes.tobytes(),
+            face_id,
+            "UNKNOWN",
+            coordinates,
+            frame_timestamp
+        )
+        
+        # Log if suspicious
+        if analysis.get('is_suspicious', False):
+            suspicious_log_entry = {
+                'face_id': face_id,
+                'suspicion_score': analysis['suspicion_score'],
+                'risk_level': analysis.get('risk_level', 'UNKNOWN'),
+                'activities': analysis.get('activities', []),
+                'reasoning': analysis.get('reasoning', ''),
+                'timestamp': frame_timestamp,
+                'time_str': time.strftime("%H:%M:%S", time.localtime(frame_timestamp))
+            }
+            
+            with state_lock:
+                suspicious_activities_log.append(suspicious_log_entry)
+            
+            logger.warning(
+                f"SUSPICIOUS ACTIVITY DETECTED: {face_id} "
+                f"(Score: {analysis['suspicion_score']:.2f}, Risk: {analysis.get('risk_level')})"
+            )
+        else:
+            logger.info(f"Activity analysis for {face_id}: Not suspicious (Score: {analysis['suspicion_score']:.2f})")
+            
+    except Exception as e:
+        logger.error(f"Error analyzing activity for {face_id}: {e}")
+
 def face_worker(task_queue, result_queue):
     while True:
         face_id, face_crop = task_queue.get()
@@ -363,25 +483,40 @@ def open_camera():
         for backend_name, backend in [("CAP_DSHOW", cv2.CAP_DSHOW), ("CAP_MSMF", cv2.CAP_MSMF), ("DEFAULT", None)]:
             cap = cv2.VideoCapture(index, backend) if backend else cv2.VideoCapture(index)
             if cap.isOpened():
+                cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+                cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
+                cap.set(cv2.CAP_PROP_FPS, 30)
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # minimize internal buffer lag
                 print(f"Opened webcam: index={index}, backend={backend_name}")
                 return cap
             cap.release()
     return None
 
 def main():
-    global latest_known, latest_unknown, latest_counts, latest_frame_bytes, alert_log
+    global latest_known, latest_unknown, latest_counts, latest_frame_bytes, latest_frame_np, alert_log
 
     if DeepFace is None:
         print(f"Error: DeepFace failed to import.\nDetails: {DEEPFACE_IMPORT_ERROR}\nFix: pip install tf-keras deepface")
         return
+
+    # Initialize Copilot analyzer if enabled
+    if activity_analysis_enabled:
+        try:
+            copilot_analyzer = get_analyzer(COPILOT_API_KEY, COPILOT_MODEL)
+            logger.info("Copilot activity analyzer initialized successfully")
+            print("✓ Copilot activity detection ENABLED")
+        except Exception as e:
+            logger.warning(f"Failed to initialize Copilot analyzer: {e}")
+            activity_analysis_enabled = False
+            print("✗ Copilot activity detection DISABLED")
 
     precompute_db()
 
     # Start HTTP API
     server = ThreadedHTTPServer(("0.0.0.0", HTTP_PORT), APIHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    print(f"  API  →  http://localhost:{HTTP_PORT}/data")
-    print(f"  Feed →  http://localhost:{HTTP_PORT}/video_feed\n")
+    print(f"  API  ->  http://localhost:{HTTP_PORT}/data")
+    print(f"  Feed ->  http://localhost:{HTTP_PORT}/video_feed\n")
 
     # Load face detectors
     download_dnn_model()
@@ -396,7 +531,8 @@ def main():
     tracker = FaceTracker()
     task_queue = queue.Queue(maxsize=MAX_WORKERS)
     result_queue = queue.Queue()
-    active_processing = set() 
+    active_processing = set()
+    activity_processing = set()  # Track faces being analyzed for activity
 
     for _ in range(MAX_WORKERS):
         t = threading.Thread(target=face_worker, args=(task_queue, result_queue), daemon=True)
@@ -450,8 +586,40 @@ def main():
                         task_queue.put_nowait((face_id, face_crop.copy()))
                         active_processing.add(face_id)
                         tracked_people[face_id]["last_verified"] = frame_count
+                        
+                        # Store crop for activity analysis if unknown
+                        if data["name"] == "UNKNOWN" or (activity_analysis_enabled and face_id not in activity_processing):
+                            unknown_face_crops[face_id] = face_crop.copy()
                     except queue.Full:
                         pass
+            
+            # Trigger Copilot activity analysis for unknown faces
+            if (activity_analysis_enabled and 
+                face_id not in activity_processing and 
+                data["name"] == "UNKNOWN" and 
+                face_id in unknown_face_crops):
+                
+                try:
+                    x, y, w, h = data["box"]
+                    cx, cy = int(x + w/2), int(y + h/2)
+                    coords = {"x": int(x), "y": int(y), "w": int(w), "h": int(h), "center_x": cx, "center_y": cy}
+                    
+                    # Run async activity analysis
+                    face_crop = unknown_face_crops[face_id]
+                    asyncio.create_task(
+                        analyze_unknown_activity(face_id, face_crop, coords, time.time())
+                    )
+                    activity_processing.add(face_id)
+                    
+                    # Clean up old crops
+                    if len(unknown_face_crops) > 100:
+                        oldest_id = list(unknown_face_crops.keys())[0]
+                        del unknown_face_crops[oldest_id]
+                        if oldest_id in activity_processing:
+                            activity_processing.discard(oldest_id)
+                            
+                except Exception as e:
+                    logger.error(f"Error triggering activity analysis: {e}")
 
         # 5. Build JSON format & UI Annotations
         k_list, u_list = [], []
@@ -480,7 +648,8 @@ def main():
             cv2.putText(frame, f"({cx}, {cy})", (x, y+h+16), cv2.FONT_HERSHEY_SIMPLEX, 0.42, color, 1)
 
         # 6. Update HTTP Shared State
-        _, buf = cv2.imencode(".jpg", frame)
+        frame = auto_adjust_brightness(frame)
+        _, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 82])
         with state_lock:
             latest_known       = k_list
             latest_unknown     = u_list
@@ -490,6 +659,7 @@ def main():
                 "total":   len(current_boxes)
             }
             latest_frame_bytes = buf.tobytes()
+            latest_frame_np    = frame.copy()
 
         cv2.imshow("NEXUS — Face Recognition", frame)
         
@@ -501,6 +671,12 @@ def main():
 
     cap.release()
     cv2.destroyAllWindows()
+    
+    # Cleanup Copilot analyzer
+    if copilot_analyzer:
+        copilot_analyzer.close()
+        logger.info("Copilot analyzer closed")
+    
     print("Stopped.")
 
 if __name__ == "__main__":
