@@ -218,6 +218,32 @@ class APIHandler(BaseHTTPRequestHandler):
             except Exception as e:
                 self.send_response(500); self.end_headers()
 
+        # ── /suspicious-activities ──
+        elif self.path == "/suspicious-activities":
+            with state_lock:
+                activities = list(suspicious_activities_log)
+            self._send_json(json.dumps({
+                "activities": activities,
+                "total_count": len(activities),
+                "timestamp": time.time()
+            }))
+
+        # ── /activity-summary/<face_id> ──
+        elif self.path.startswith("/activity-summary/"):
+            face_id = self.path.split("/activity-summary/", 1)[1].split("?")[0]
+            if gemini_analyzer:
+                summary = gemini_analyzer.get_activity_summary(face_id)
+            else:
+                summary = {
+                    "face_id": face_id,
+                    "total_detections": 0,
+                    "suspicious_count": 0,
+                    "avg_suspicion": 0.0,
+                    "max_suspicion": 0.0,
+                    "risk_trend": "UNKNOWN",
+                }
+            self._send_json(json.dumps(summary))
+
         else:
             self.send_response(404)
             self.end_headers()

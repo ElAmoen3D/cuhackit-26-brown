@@ -156,6 +156,8 @@ app.get('/snapshot', async (req, res) => {
 
 // ── POST /gemini/analyze — analyze footage via Google Gemini Vision ──────────
 app.post('/gemini/analyze', async (req, res) => {
+  // Wrap everything so unhandled errors return JSON, not Express's HTML 500 page
+  try {
   const { subject, coords } = req.body ?? {}
 
   const apiKey   = process.env.GEMINI_API_KEY
@@ -228,6 +230,9 @@ app.post('/gemini/analyze', async (req, res) => {
   geminiReq.on('error', e => res.status(500).json({ error: e.message }))
   geminiReq.write(body)
   geminiReq.end()
+  } catch (err) {
+    if (!res.headersSent) res.status(500).json({ error: err.message || 'Gemini route error' })
+  }
 })
 
 // ── Internal helper: proxy a JSON request to Python ──────────────────────────
@@ -238,9 +243,20 @@ function proxyJSON(pythonPath, res, offlineFallback) {
       let raw = ''
       pRes.on('data', (chunk) => (raw += chunk))
       pRes.on('end', () => {
+        // If Python returned a non-2xx status or an empty/non-JSON body,
+        // fall back to the offline payload so the frontend always gets valid JSON.
+        const status = pRes.statusCode || 500
+        if (status < 200 || status >= 300) {
+          return res.status(503).json(offlineFallback)
+        }
+        const trimmed = raw.trim()
+        if (!trimmed || trimmed[0] === '<') {
+          // Empty body or an accidental HTML response — use offline fallback
+          return res.status(503).json(offlineFallback)
+        }
         res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate')
         res.setHeader('Content-Type', 'application/json')
-        res.send(raw)
+        res.send(trimmed)
       })
     }
   )
@@ -367,6 +383,17 @@ app.get('/live', (req, res) => {
   }
 
   connectToPython()
+})
+
+// ── Global JSON error handler (must be after all routes) ────────────────────
+// Ensures that any Express or middleware error returns JSON, never HTML.
+app.use((err, req, res, _next) => {
+  console.error('[Express Error]', err)
+  if (!res.headersSent) {
+    res.status(err.status || err.statusCode || 500).json({
+      error: err.message || 'Internal server error'
+    })
+  }
 })
 
 // ── SPA fallback — serve index.html for all other routes ─────────────────────

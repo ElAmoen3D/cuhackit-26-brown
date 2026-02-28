@@ -243,8 +243,16 @@ async function analyzWithGemini(person: { name: string; coords: FaceCoords | nul
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ subject: person.name, coords: person.coords }),
     })
+    const contentType = res.headers.get('content-type') ?? ''
+    if (!contentType.includes('application/json')) {
+      const text = await res.text()
+      throw new Error(
+        res.status === 503 ? 'Backend offline — start the server and try again'
+        : `Server error (${res.status}): response was not JSON`
+      )
+    }
     const data = await res.json()
-    if (!res.ok || data.error) throw new Error(data.error ?? 'Request failed')
+    if (!res.ok || data.error) throw new Error(data.error ?? `Request failed (${res.status})`)
     geminiResult.value = data.analysis
   } catch (err: any) {
     geminiError.value = err.message ?? 'Analysis failed'
