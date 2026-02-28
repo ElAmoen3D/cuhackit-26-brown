@@ -614,6 +614,11 @@ def main():
     frame_count = 0
     consecutive_failures = 0
     MAX_CONSECUTIVE_FAILURES = 30  # ~1 second at 30fps before attempting camera reconnect
+    
+    # --- Frame Skipping Variables ---
+    PROCESS_EVERY_N_FRAMES = 3  # Run heavy detection 1 in every 3 frames (~10 fps detection, 30 fps video)
+    cached_boxes = []
+
     print("Camera running. Press Q in the OpenCV window to quit.\n")
 
     while True:
@@ -636,12 +641,17 @@ def main():
                 logger.info("Camera reconnected successfully.")
             continue  # skip this frame, do not update state
         consecutive_failures = 0
+        frame_count += 1
 
-        # 1. Detection
-        if yunet_detector is not None:
-            current_boxes = detect_faces_yunet(frame, yunet_detector)
+        # 1. Detection (Frame Skipping)
+        if frame_count % PROCESS_EVERY_N_FRAMES == 0 or not cached_boxes:
+            if yunet_detector is not None:
+                current_boxes = detect_faces_yunet(frame, yunet_detector)
+            else:
+                current_boxes = detect_faces_dnn(frame, face_net)
+            cached_boxes = current_boxes
         else:
-            current_boxes = detect_faces_dnn(frame, face_net)
+            current_boxes = cached_boxes
 
         # 2. Update Spatial Tracker
         tracked_people = tracker.update(current_boxes)
@@ -654,7 +664,7 @@ def main():
                     old_name = tracked_people[fid]["name"]
                     voted_name = tracker.apply_vote(fid, raw_name)
                     tracked_people[fid]["name"] = voted_name
-                    
+                
                     # Generate alerts when a known identity is first confirmed
                     if old_name == "SCANNING..." and voted_name not in ("SCANNING...", "UNKNOWN"):
                         alert_log.append({"type": "KNOWN", "name": voted_name, "time": time.strftime("%H:%M:%S")})
@@ -797,6 +807,7 @@ def main():
             }
             latest_frame_bytes = buf.tobytes()
             latest_frame_np    = frame.copy()
+
 
         cv2.imshow("NEXUS — Face Recognition", frame)
         

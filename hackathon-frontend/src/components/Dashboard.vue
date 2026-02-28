@@ -294,9 +294,10 @@ onUnmounted(() => {
 
     <!-- ── NARROW ICON SIDEBAR ──────────────────────────────────── -->
     <nav class="icon-sidebar">
-      <!-- System label (no logo) -->
+      <!-- System label with Tiger Security logo -->
       <div class="sidebar-brand">
-        <span class="sys-label">SV<span class="sys-dot">·</span>1</span>
+        <img src="/tiger-logo.png" alt="Tiger Security Logo" class="sys-logo" />
+        <span class="sys-label">TIGER SECURITY</span>
         <span class="sys-status-dot" :class="systemOnline ? 'online' : 'offline'"></span>
       </div>
 
@@ -310,7 +311,7 @@ onUnmounted(() => {
         <li :class="{ active: showFaceDbModal }"
             @click="openFaceDb()"
             title="Face Database">
-          <component :is="Camera" :size="20" />
+          <component :is="Database" :size="20" />
         </li>
 
         <li :class="{ active: currentPage === 'dashboard' && activeTab === 'detected' }"
@@ -330,24 +331,6 @@ onUnmounted(() => {
             title="Gemini Activity Analysis">
           <component :is="Zap" :size="20" />
         </li>
-
-        <li :class="{ active: currentPage === 'signal' }"
-            @click="currentPage = 'signal'"
-            title="Signal Intelligence">
-          <component :is="Signal" :size="20" />
-        </li>
-
-        <li :class="{ active: currentPage === 'monitor' }"
-            @click="currentPage = 'monitor'"
-            title="System Monitor">
-          <component :is="Monitor" :size="20" />
-        </li>
-
-        <li :class="{ active: currentPage === 'shield' }"
-            @click="currentPage = 'shield'"
-            title="Threat Shield">
-          <component :is="Shield" :size="20" />
-        </li>
       </ul>
 
       <ul class="nav-icons nav-icons-bottom">
@@ -364,26 +347,20 @@ onUnmounted(() => {
       <header class="page-header">
         <div class="ph-left">
           <div class="ph-breadcrumb">
-            <span class="ph-system">SENTINEL</span>
+            <span class="ph-system">TIGER SECURITY</span>
             <component :is="ChevronRight" :size="12" class="ph-sep" />
             <span class="ph-page">
               <span v-if="currentPage === 'dashboard'">Dashboard</span>
               <span v-else-if="currentPage === 'logs'">Access Logs</span>
               <span v-else-if="currentPage === 'activity'">Activity Analysis</span>
-              <span v-else-if="currentPage === 'signal'">Signal Intel</span>
-              <span v-else-if="currentPage === 'monitor'">System Monitor</span>
-              <span v-else>Threat Shield</span>
             </span>
           </div>
           <h1 v-if="currentPage === 'dashboard'">Dashboard</h1>
           <h1 v-else-if="currentPage === 'logs'">Access Logs</h1>
           <h1 v-else-if="currentPage === 'activity'">Gemini Activity Analysis</h1>
-          <h1 v-else-if="currentPage === 'signal'">Signal Intelligence</h1>
-          <h1 v-else-if="currentPage === 'monitor'">System Monitor</h1>
-          <h1 v-else>Threat Shield</h1>
           <p class="ph-sub">
             <span v-if="isAuthenticated">Operator: <strong>{{ user.name }}</strong></span>
-            <span v-else>Operator: <strong>SecureView</strong></span>
+            <span v-else>Operator: <strong>Tiger Sentinel</strong></span>
             &nbsp;·&nbsp;
             <span :class="['ph-status', systemOnline ? 'online' : 'offline']">
               {{ systemOnline ? '● ONLINE' : '● OFFLINE' }}
@@ -745,7 +722,7 @@ onUnmounted(() => {
                 </div>
 
                 <div class="detected-actions">
-                  <button v-if="person.type === 'unknown'" class="add-person-btn">
+                  <button v-if="person.type === 'unknown'" class="add-person-btn" @click="openFaceDb()">
                     <component :is="UserPlus" :size="14" />
                     Enroll
                   </button>
@@ -815,97 +792,7 @@ onUnmounted(() => {
           </div>
         </template>
 
-        <!-- ═════════════════════════════════════════════════════════ -->
-        <!--                   SIGNAL INTEL PAGE                      -->
-        <!-- ═════════════════════════════════════════════════════════ -->
-        <template v-if="currentPage === 'signal'">
-          <div class="dev-page">
-            <div class="dev-card">
-              <div class="dev-icon-wrap signal">
-                <component :is="Radio" :size="48" />
-              </div>
-              <div class="dev-tag">MODULE · SIGNAL INTEL</div>
-              <h2 class="dev-title">Signal Intelligence</h2>
-              <p class="dev-desc">
-                Real-time RF spectrum monitoring, wireless intrusion detection, and
-                signal-source triangulation are currently being integrated into the
-                Sentinel platform.
-              </p>
-              <div class="dev-features">
-                <div class="dev-feature"><span class="dev-check">◈</span> RF Spectrum Analysis</div>
-                <div class="dev-feature"><span class="dev-check">◈</span> Wireless Intrusion Detection</div>
-                <div class="dev-feature"><span class="dev-check">◈</span> Bluetooth / BLE Tracking</div>
-                <div class="dev-feature"><span class="dev-check">◈</span> Signal Source Triangulation</div>
-              </div>
-              <div class="dev-status-bar">
-                <span class="dev-status-label">DEVELOPMENT STATUS</span>
-                <div class="dev-progress-track"><div class="dev-progress-fill" style="width: 42%"></div></div>
-                <span class="dev-progress-pct">42%</span>
-              </div>
-            </div>
-          </div>
-        </template>
 
-        <!-- ═════════════════════════════════════════════════════════ -->
-        <!--                  SYSTEM MONITOR PAGE                     -->
-        <!-- ═════════════════════════════════════════════════════════ -->
-        <template v-if="currentPage === 'monitor'">
-          <div class="dev-page">
-            <div class="dev-card">
-              <div class="dev-icon-wrap monitor">
-                <component :is="Cpu" :size="48" />
-              </div>
-              <div class="dev-tag">MODULE · SYSTEM MONITOR</div>
-              <h2 class="dev-title">System Monitor</h2>
-              <p class="dev-desc">
-                Full hardware telemetry, GPU utilization dashboards, thermal management,
-                and process-level performance profiling coming to the Sentinel platform.
-              </p>
-              <div class="dev-features">
-                <div class="dev-feature"><span class="dev-check">◈</span> CPU / GPU Utilization</div>
-                <div class="dev-feature"><span class="dev-check">◈</span> Memory & Thermal Telemetry</div>
-                <div class="dev-feature"><span class="dev-check">◈</span> Network I/O Monitoring</div>
-                <div class="dev-feature"><span class="dev-check">◈</span> Process Health Dashboard</div>
-              </div>
-              <div class="dev-status-bar">
-                <span class="dev-status-label">DEVELOPMENT STATUS</span>
-                <div class="dev-progress-track"><div class="dev-progress-fill monitor" style="width: 67%"></div></div>
-                <span class="dev-progress-pct">67%</span>
-              </div>
-            </div>
-          </div>
-        </template>
-
-        <!-- ═════════════════════════════════════════════════════════ -->
-        <!--                   THREAT SHIELD PAGE                     -->
-        <!-- ═════════════════════════════════════════════════════════ -->
-        <template v-if="currentPage === 'shield'">
-          <div class="dev-page">
-            <div class="dev-card">
-              <div class="dev-icon-wrap shield">
-                <component :is="Lock" :size="48" />
-              </div>
-              <div class="dev-tag">MODULE · THREAT SHIELD</div>
-              <h2 class="dev-title">Threat Shield</h2>
-              <p class="dev-desc">
-                Automated threat classification, perimeter breach alerting, multi-zone
-                security rules, and active countermeasure orchestration planned for
-                the next Sentinel release.
-              </p>
-              <div class="dev-features">
-                <div class="dev-feature"><span class="dev-check">◈</span> Automated Threat Classification</div>
-                <div class="dev-feature"><span class="dev-check">◈</span> Perimeter Breach Alerting</div>
-                <div class="dev-feature"><span class="dev-check">◈</span> Multi-Zone Security Rules</div>
-                <div class="dev-feature"><span class="dev-check">◈</span> Countermeasure Orchestration</div>
-              </div>
-              <div class="dev-status-bar">
-                <span class="dev-status-label">DEVELOPMENT STATUS</span>
-                <div class="dev-progress-track"><div class="dev-progress-fill shield" style="width: 28%"></div></div>
-                <span class="dev-progress-pct">28%</span>
-              </div>
-            </div>
-          </div>
-        </template>
 
       </div><!-- /page-body -->
     </main>
@@ -1172,30 +1059,36 @@ onUnmounted(() => {
 
 /* ── CSS VARIABLES ────────────────────────────────────────────────────────── */
 .app-shell {
-  --bg:          #080b0f;
-  --sidebar-bg:  #090d12;
-  --surface:     #0d1117;
-  --surface-2:   #161b22;
-  --surface-3:   #21262d;
-  --border:      #2d333b;
-  --border-soft: #1c2128;
-  --accent:      #ef4444;
-  --accent-dim:  rgba(239,68,68,0.12);
-  --accent-line: rgba(239,68,68,0.35);
-  --accent-glow: rgba(239,68,68,0.25);
-  --green:       #22c55e;
-  --green-glow:  rgba(34,197,94,0.2);
-  --amber:       #f59e0b;
-  --blue:        #3b82f6;
-  --cyan:        #06b6d4;
-  --indigo:      #6366f1;
-  --text:        #e1e8ed;
-  --text-dim:    #8b95a5;
-  --text-muted:  #4b5563;
+  --bg:          var(--tiger-bg);
+  --sidebar-bg:  var(--tiger-surface);
+  --surface:     var(--tiger-surface);
+  --surface-2:   #f8fafc;
+  --surface-3:   #f1f5f9;
+  --border:      var(--tiger-surface-border);
+  --border-soft: #e2e8f0;
+  --accent:      var(--tiger-danger);
+  --accent-dim:  rgba(225, 29, 72, 0.12);
+  --accent-line: rgba(225, 29, 72, 0.35);
+  --accent-glow: rgba(225, 29, 72, 0.25);
+  --green:       var(--tiger-success);
+  --green-glow:  rgba(22, 163, 74, 0.2);
+  --amber:       #d97706;
+  --blue:        var(--tiger-primary);
+  --cyan:        var(--tiger-primary);
+  --indigo:      var(--tiger-secondary);
+  --text:        var(--tiger-text-base);
+  --text-dim:    #475569;
+  --text-muted:  var(--tiger-text-muted);
   --mono:        'JetBrains Mono', monospace;
-  --sans:        'Space Grotesk', system-ui, sans-serif;
+  --sans:        'Outfit', 'Inter', system-ui, sans-serif;
   --sidebar-w:   64px;
-  --radius:      10px;
+  --radius:      16px;
+}
+
+h1, h2, h3, .sys-label, .ph-system {
+  font-family: 'Outfit', sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -1236,12 +1129,22 @@ onUnmounted(() => {
   margin-bottom: 8px;
   gap: 6px;
 }
+.sys-logo {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  margin-bottom: 4px;
+  filter: drop-shadow(0 2px 8px var(--tiger-primary-glow));
+}
 .sys-label {
-  font-family: var(--mono);
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  color: var(--text-muted);
+  font-family: 'Outfit', sans-serif;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: var(--tiger-primary);
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
+  text-align: center;
+  line-height: 1.1;
   text-transform: uppercase;
 }
 .sys-dot { color: var(--accent); }
@@ -1356,23 +1259,29 @@ onUnmounted(() => {
 
 /* ── HEADER ICON BUTTONS ──────────────────────────────────────────────────── */
 .hdr-icon-btn {
-  width: 34px; height: 34px;
+  width: 36px; height: 36px;
   background: var(--surface-2);
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   color: var(--text-dim);
   cursor: pointer;
-  transition: all 0.17s ease;
+  transition: all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
   position: relative;
 }
-.hdr-icon-btn:hover { color: var(--text); background: var(--surface-3); border-color: var(--border); }
+.hdr-icon-btn:hover { 
+  color: var(--tiger-primary); 
+  background: var(--tiger-primary-glow); 
+  border-color: var(--tiger-primary); 
+  transform: translateY(-2px);
+  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+}
 .everyone { margin-right: 4px; }
 .notif-btn.active { background: var(--accent-dim); border-color: var(--accent-line); color: var(--accent); }
-.login-btn:hover  { border-color: var(--green); color: var(--green); }
-.logout-btn:hover { border-color: var(--accent); color: var(--accent); }
+.login-btn:hover  { border-color: var(--green); color: var(--green); box-shadow: 0 4px 12px var(--green-glow); }
+.logout-btn:hover { border-color: var(--accent); color: var(--accent); box-shadow: 0 4px 12px var(--accent-glow); }
 
 .notif-badge {
   position: absolute;
@@ -1624,7 +1533,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 7px;
-  background: none;
+  background: transparent;
   border: none;
   border-bottom: 2px solid transparent;
   padding: 10px 4px;
@@ -1635,10 +1544,14 @@ onUnmounted(() => {
   font-size: 0.8rem;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.18s ease;
+  transition: color 0.2s ease, border-color 0.2s ease, text-shadow 0.2s ease;
 }
 .tab-pill:hover  { color: var(--text); }
-.tab-pill.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.tab-pill.active { 
+  color: var(--tiger-primary); 
+  border-bottom-color: var(--tiger-primary); 
+  font-weight: 600; 
+}
 .tab-badge {
   background: var(--accent);
   color: #fff;
@@ -1664,11 +1577,17 @@ onUnmounted(() => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  transition: border-color 0.2s ease;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+  box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 2px 4px -2px rgba(0,0,0,0.05);
+}
+.cam-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -4px rgba(0,0,0,0.1);
+  border-color: rgba(37, 99, 235, 0.4);
 }
 .cam-card.cam-live {
-  border-color: rgba(34, 197, 94, 0.4);
-  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.1);
+  border-color: rgba(22, 163, 74, 0.4);
+  box-shadow: 0 0 15px rgba(22, 163, 74, 0.1), 0 4px 6px -1px rgba(0, 0, 0, 0.05);
 }
 .cam-header {
   display: flex;

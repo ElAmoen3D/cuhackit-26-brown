@@ -1,22 +1,58 @@
 <!DOCTYPE html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8">
-    <link rel="icon" href="/favicon.ico">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Security Dashboard Prototype</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-      body {
-        margin: 0;
-        font-family: 'Inter', sans-serif;
-      }
-    </style>
-  </head>
-  <body>
-    <div id="app"></div>
-    <script type="module" src="/src/main.js"></script>
-  </body>
+
+<head>
+  <meta charset="UTF-8">
+  <link rel="icon" href="/favicon.ico">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Security Dashboard Prototype</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link
+    href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;700;800&display=swap"
+    rel="stylesheet">
+  <style>
+    :root {
+      --tiger-bg: #e2e8f0;
+      /* Slate 200 */
+      --tiger-surface: #ffffff;
+      --tiger-surface-border: #cbd5e1;
+      /* Slate 300 */
+      --tiger-primary: #2563eb;
+      /* Blue 600 */
+      --tiger-primary-glow: rgba(37, 99, 235, 0.2);
+      --tiger-secondary: #4f46e5;
+      /* Indigo 600 */
+      --tiger-secondary-glow: rgba(79, 70, 229, 0.2);
+      --tiger-text-base: #0f172a;
+      /* Slate 900 */
+      --tiger-text-muted: #64748b;
+      /* Slate 500 */
+      --tiger-danger: #e11d48;
+      /* Rose 600 */
+      --tiger-success: #16a34a;
+      /* Green 600 */
+    }
+
+    body {
+      margin: 0;
+      font-family: 'Inter', sans-serif;
+      background-color: var(--tiger-bg);
+      color: var(--tiger-text-base);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    ::selection {
+      background: var(--tiger-primary);
+      color: #fff;
+    }
+  </style>
+</head>
+
+<body>
+  <div id="app"></div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+
 </html>
