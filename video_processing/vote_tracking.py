@@ -17,7 +17,10 @@ STRICT_THRESHOLD = 0.32    # For initial identification
 FORGIVING_THRESHOLD = 0.45 # For maintaining a "Locked" identity
 
 FACE_CASCADE = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
-REFERENCE_DATA = [] 
+REFERENCE_DATA = []
+
+# DeepFace / TensorFlow is NOT thread-safe — serialise all model calls with this lock
+_deepface_lock = threading.Lock()
 
 def precompute_db():
     print("--- Pre-computing database signatures... ---")
@@ -89,8 +92,9 @@ class FaceTracker:
 
 def identify_face(face_crop, is_locked=False):
     try:
-        live_res = DeepFace.represent(img_path=face_crop, model_name=VERIFICATION_MODEL, 
-                                     enforce_detection=False, align=True, detector_backend="opencv")
+        with _deepface_lock:
+            live_res = DeepFace.represent(img_path=face_crop, model_name=VERIFICATION_MODEL,
+                                         enforce_detection=False, align=True, detector_backend="opencv")
         if not live_res: return "Unknown"
         
         live_vec = np.array(live_res[0]["embedding"])
@@ -153,7 +157,11 @@ def main():
         ai_updates = {}
         for future in list(pending_jobs.keys()):
             if future.done():
-                ai_updates[pending_jobs.pop(future)] = future.result()
+                box = pending_jobs.pop(future)
+                try:
+                    ai_updates[box] = future.result()
+                except Exception as e:
+                    print(f"[Worker error] {e}")
 
         tracked_people = tracker.update(current_boxes, ai_updates)
 
