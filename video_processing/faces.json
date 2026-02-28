@@ -1,0 +1,19 @@
+{
+  "timestamp": 1772254017.922783,
+  "faces": [
+    {
+      "id": 154,
+      "label": "face1",
+      "name": "Unknown",
+      "coordinates": {
+        "x": 683,
+        "y": 472,
+        "width": 411,
+        "height": 411,
+        "center_x": 888,
+        "center_y": 677
+      },
+      "image_file": "unknown_1772254017237.jpeg"
+    }
+  ]
+}

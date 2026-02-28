@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CUHackit Live Face Tracking</title>
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="dashboard-container">
+        <header>
+            <h1>CUHackit <span>Vision</span> System</h1>
+            <div class="status-indicator">
+                <span class="dot pulse"></span>
+                <span>System Online</span>
+            </div>
+        </header>
+
+        <main>
+            <!-- Video Feed Section -->
+            <section class="glass-panel video-section">
+                <h2>Live Camera Feed</h2>
+                <div class="video-container">
+                    <img id="live-feed" src="/live" alt="Live Camera Feed">
+                </div>
+            </section>
+
+            <!-- Detections Section -->
+            <section class="detections-grid">
+                <!-- Known Faces -->
+                <div class="glass-panel known-faces-panel">
+                    <h2><span class="icon success-icon">●</span> Verified Entities (Known)</h2>
+                    <div id="known-list" class="cards-container">
+                        <p class="empty-state">Waiting for detections...</p>
+                    </div>
+                </div>
+
+                <!-- Unknown Faces -->
+                <div class="glass-panel unknown-faces-panel">
+                    <h2><span class="icon danger-icon">●</span> Unverified Entities (Unknown)</h2>
+                    <div id="unknown-list" class="cards-container">
+                        <p class="empty-state">Waiting for detections...</p>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+    <script src="app.js"></script>
+</body>
+</html>
