@@ -287,8 +287,10 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (pollTimer)  clearInterval(pollTimer)
-  if (clockTimer) clearInterval(clockTimer)
+  if (pollTimer)      clearInterval(pollTimer)
+  if (clockTimer)     clearInterval(clockTimer)
+  if (_retryTimer)    clearTimeout(_retryTimer)
+  if (_countdownTimer) clearInterval(_countdownTimer)
 })
 </script>
 
@@ -1961,6 +1963,18 @@ onUnmounted(() => {
   border-radius: 8px;
   background: var(--surface-2);
   transition: border-color 0.18s ease, background 0.18s ease;
+}
+.detected-top {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.detected-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .detected-item:hover { border-color: var(--border); background: var(--surface-3); }
 .detected-item.unknown { border-left: 3px solid var(--accent); }

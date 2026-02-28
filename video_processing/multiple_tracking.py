@@ -65,11 +65,12 @@ VERIFICATION_FREQ = 10       # Re-verify more often so votes accumulate faster
 VOTE_HISTORY_SIZE = 7        # Rolling window of results to vote over
 MAX_WORKERS = 1              # Must be 1: TensorFlow/Keras is NOT thread-safe for concurrent inference
 HTTP_PORT = 5001
+UNKNOWN_CONFIRM_FRAMES = 60  # Frames a face must stay UNKNOWN before being surfaced as an intruder
 
 # ── Brightness Auto-Adjustment ────────────────────────────────────────────────
 # Set TARGET_BRIGHTNESS to a value 0–255 to automatically scale each frame so
 # its mean luminance matches that level.  Set to -1 to disable.
-TARGET_BRIGHTNESS = 128   # ← change this value to control target brightness
+TARGET_BRIGHTNESS = 50   # ← change this value to control target brightness
 
 # --- DNN Face Detector ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -82,8 +83,8 @@ SMALL_FACE_UPSCALE_TARGET = 80
 
 # --- YuNet: full-resolution detector ---
 YUNET_MODEL_PATH      = os.path.join(SCRIPT_DIR, "face_detection_yunet_2023mar.onnx")
-YUNET_SCORE_THRESHOLD = 0.55  
-YUNET_NMS_THRESHOLD   = 0.30
+YUNET_SCORE_THRESHOLD = 0.60  
+YUNET_NMS_THRESHOLD   = 0.20
 
 # ── Shared state (protected by lock for HTTP Server) ──────────────────────────
 state_lock          = threading.Lock()
@@ -131,13 +132,25 @@ class APIHandler(BaseHTTPRequestHandler):
             self.send_header("Cache-Control", "no-cache, no-store")
             self.send_header("Access-Control-Allow-Origin", "*")
             self.end_headers()
+            last_sent_time = 0.0
             try:
                 while True:
                     with state_lock:
                         fb = latest_frame_bytes
+                    now = time.time()
                     if fb:
                         self.wfile.write(b"--FRAME\r\nContent-Type: image/jpeg\r\n\r\n" + fb + b"\r\n")
                         self.wfile.flush()  # send immediately — prevents buffer buildup delay
+                        last_sent_time = now
+                    elif now - last_sent_time > 5.0:
+                        # Send a keepalive comment boundary so the connection stays open
+                        # even when the camera hasn't produced a frame yet
+                        try:
+                            self.wfile.write(b"--FRAME\r\n\r\n")
+                            self.wfile.flush()
+                        except:
+                            return
+                        last_sent_time = now
                     time.sleep(0.033)   # ~30 fps
             except:
                 return
@@ -262,7 +275,7 @@ def detect_faces_yunet(frame, detector):
             fw, fh = min(fw, w - x), min(fh, h - y)
             if fw >= DNN_MIN_FACE_PX and fh >= DNN_MIN_FACE_PX:
                 boxes.append((x, y, fw, fh))
-    return boxes
+    return _nms_boxes(boxes)
 
 def download_dnn_model():
     prototxt_url = "https://raw.githubusercontent.com/opencv/opencv/4.x/samples/dnn/face_detector/deploy.prototxt"
@@ -296,7 +309,7 @@ def _run_dnn_on_frame(frame, net, scale=1.0):
                 boxes.append((x1, y1, bw, bh))
     return boxes
 
-def _nms_boxes(boxes, iou_threshold=0.4):
+def _nms_boxes(boxes, iou_threshold=0.3):
     if not boxes: return []
     rects = np.array([[x, y, x + w, y + h] for x, y, w, h in boxes], dtype=np.float32)
     x1, y1, x2, y2 = rects[:, 0], rects[:, 1], rects[:, 2], rects[:, 3]
@@ -452,31 +465,55 @@ class FaceTracker:
 
     def update(self, current_boxes):
         new_tracking = {}
-        for box in current_boxes:
-            box_tuple = tuple(box)
-            curr_center = np.array([box[0] + box[2]/2, box[1] + box[3]/2])
-            best_id, min_dist = None, 120 
 
+        # Build all candidate (distance, box_index, face_id) pairs.
+        # Using size-relative threshold so matches can't "jump" across nearby faces.
+        candidates = []
+        for bi, box in enumerate(current_boxes):
+            curr_center = np.array([box[0] + box[2] / 2, box[1] + box[3] / 2])
             for face_id, data in self.tracked_faces.items():
                 prev_box = data["box"]
-                prev_center = np.array([prev_box[0] + prev_box[2]/2, prev_box[1] + prev_box[3]/2])
+                prev_center = np.array([prev_box[0] + prev_box[2] / 2, prev_box[1] + prev_box[3] / 2])
                 dist = np.linalg.norm(curr_center - prev_center)
-                if dist < min_dist:
-                    min_dist, best_id = dist, face_id
+                # Threshold scales with face size — prevents cross-assignment when faces are close
+                max_dim = max(box[2], box[3], prev_box[2], prev_box[3])
+                threshold = max(80, max_dim * 1.2)
+                if dist < threshold:
+                    candidates.append((dist, bi, face_id))
 
-            if best_id is not None:
-                new_tracking[best_id] = {
-                    "box": box_tuple, 
-                    "name": self.tracked_faces[best_id]["name"],
-                    "last_verified": self.tracked_faces[best_id].get("last_verified", 0),
-                    "history": self.tracked_faces[best_id].get("history", deque(maxlen=VOTE_HISTORY_SIZE)),
-                }
-            else:
-                new_tracking[self.next_id] = {
-                    "box": box_tuple, "name": "SCANNING...", "last_verified": 0,
-                    "history": deque(maxlen=VOTE_HISTORY_SIZE),
-                }
-                self.next_id += 1
+        # Optimal greedy assignment: sort by distance so closest pairs are locked in first.
+        # Each box index and each face_id can only be used once — prevents identity stealing.
+        candidates.sort()
+        assigned_boxes = set()
+        assigned_tracks = set()
+
+        for dist, bi, face_id in candidates:
+            if bi in assigned_boxes or face_id in assigned_tracks:
+                continue
+            box = current_boxes[bi]
+            prev = self.tracked_faces[face_id]
+            new_tracking[face_id] = {
+                "box": tuple(box),
+                "name": prev["name"],
+                "last_verified": prev.get("last_verified", 0),
+                "history": prev.get("history", deque(maxlen=VOTE_HISTORY_SIZE)),
+                "unknown_frames": prev.get("unknown_frames", 0),
+                "unknown_alert_sent": prev.get("unknown_alert_sent", False),
+            }
+            assigned_boxes.add(bi)
+            assigned_tracks.add(face_id)
+
+        # Any box that couldn't be matched to an existing track gets a new ID
+        for bi, box in enumerate(current_boxes):
+            if bi in assigned_boxes:
+                continue
+            new_tracking[self.next_id] = {
+                "box": tuple(box), "name": "SCANNING...", "last_verified": 0,
+                "history": deque(maxlen=VOTE_HISTORY_SIZE),
+                "unknown_frames": 0,
+                "unknown_alert_sent": False,
+            }
+            self.next_id += 1
 
         self.tracked_faces = new_tracking
         return self.tracked_faces
@@ -550,11 +587,30 @@ def main():
         t.start()
 
     frame_count = 0
+    consecutive_failures = 0
+    MAX_CONSECUTIVE_FAILURES = 30  # ~1 second at 30fps before attempting camera reconnect
     print("Camera running. Press Q in the OpenCV window to quit.\n")
 
     while True:
         ret, frame = cap.read()
-        if not ret: break
+        if not ret:
+            consecutive_failures += 1
+            if consecutive_failures >= MAX_CONSECUTIVE_FAILURES:
+                logger.warning(f"Camera read failed {consecutive_failures} times — attempting reconnect...")
+                cap.release()
+                time.sleep(1)
+                cap = open_camera()
+                if cap is None:
+                    logger.error("Camera reconnect failed — retrying in 3s...")
+                    time.sleep(3)
+                    cap = open_camera()
+                    if cap is None:
+                        logger.error("Could not reopen camera. Exiting.")
+                        break
+                consecutive_failures = 0
+                logger.info("Camera reconnected successfully.")
+            continue  # skip this frame, do not update state
+        consecutive_failures = 0
 
         # 1. Detection
         if yunet_detector is not None:
@@ -574,13 +630,9 @@ def main():
                     voted_name = tracker.apply_vote(fid, raw_name)
                     tracked_people[fid]["name"] = voted_name
                     
-                    # Generate alerts if identity shifted from Scanning to something else
-                    if old_name == "SCANNING..." and voted_name != "SCANNING...":
-
-                        if voted_name == "UNKNOWN":
-                            alert_log.append({"type": "UNKNOWN", "name": "INTRUDER", "time": time.strftime("%H:%M:%S")})
-                        else:
-                            alert_log.append({"type": "KNOWN", "name": voted_name, "time": time.strftime("%H:%M:%S")})
+                    # Generate alerts when a known identity is first confirmed
+                    if old_name == "SCANNING..." and voted_name not in ("SCANNING...", "UNKNOWN"):
+                        alert_log.append({"type": "KNOWN", "name": voted_name, "time": time.strftime("%H:%M:%S")})
 
                 if fid in active_processing:
                     active_processing.remove(fid)
@@ -604,10 +656,11 @@ def main():
                     except queue.Full:
                         pass
             
-            # Trigger Copilot activity analysis for unknown faces
+            # Trigger Copilot activity analysis for confirmed unknown faces only
             if (activity_analysis_enabled and 
                 face_id not in activity_processing and 
-                data["name"] == "UNKNOWN" and 
+                data["name"] == "UNKNOWN" and
+                data.get("unknown_frames", 0) >= UNKNOWN_CONFIRM_FRAMES and
                 face_id in unknown_face_crops):
                 
                 try:
@@ -646,13 +699,32 @@ def main():
 
             coords = {"x": int(x), "y": int(y), "w": int(w), "h": int(h), "center_x": cx, "center_y": cy}
 
-            if name == "SCANNING...":
+            if name == "UNKNOWN":
+                # Increment per-face unknown frame counter
+                tracked_people[fid]["unknown_frames"] = tracked_people[fid].get("unknown_frames", 0) + 1
+                unk_frames = tracked_people[fid]["unknown_frames"]
+
+                if unk_frames >= UNKNOWN_CONFIRM_FRAMES:
+                    # Confirmed intruder — surface as unknown
+                    color, label = (0, 0, 255), "UNKNOWN"
+                    u_list.append(coords)
+                    # Fire alert exactly once per confirmed intruder appearance
+                    if not tracked_people[fid].get("unknown_alert_sent", False):
+                        alert_log.append({"type": "UNKNOWN", "name": "INTRUDER", "time": time.strftime("%H:%M:%S")})
+                        tracked_people[fid]["unknown_alert_sent"] = True
+                else:
+                    # Still accumulating — treat as scanning
+                    color, label = (0, 220, 220), "SCANNING..."
+                    k_list.append({"name": "SCANNING...", "coords": coords})
+            elif name == "SCANNING...":
+                tracked_people[fid]["unknown_frames"] = 0
+                tracked_people[fid]["unknown_alert_sent"] = False
                 color, label = (0, 220, 220), "SCANNING..."
                 k_list.append({"name": "SCANNING...", "coords": coords})
-            elif name == "UNKNOWN":
-                color, label = (0, 0, 255), "UNKNOWN"
-                u_list.append(coords)
             else:
+                # Identified — reset unknown counter so re-appearances start fresh
+                tracked_people[fid]["unknown_frames"] = 0
+                tracked_people[fid]["unknown_alert_sent"] = False
                 color, label = (0, 255, 80), name
                 k_list.append({"name": name, "coords": coords})
 
@@ -671,7 +743,7 @@ def main():
             latest_counts      = {
                 "known":   len([p for p in k_list if p["name"] != "SCANNING..."]),
                 "unknown": len(u_list),
-                "total":   len(current_boxes)
+                "total":   len(tracked_people)
             }
             latest_frame_bytes = buf.tobytes()
             latest_frame_np    = frame.copy()

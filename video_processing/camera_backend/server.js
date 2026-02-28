@@ -315,31 +315,69 @@ app.get('/activity-summary/:faceId', (req, res) => {
 
 // ── GET /live  — MJPEG video stream ──────────────────────────────────────────
 app.get('/live', (req, res) => {
-  let headersSent = false
-  const pythonReq = http.get(
-    `http://${PYTHON_HOST}:${PYTHON_PORT}/video_feed`,
-    (pRes) => {
-      res.writeHead(pRes.statusCode, {
-        ...pRes.headers,
-        'Access-Control-Allow-Origin': '*',
-      })
-      headersSent = true
-      pRes.pipe(res)
-      pRes.on('error', () => res.destroy())
-    }
-  )
+  const RECONNECT_DELAY_MS = 1000
+  const MAX_RECONNECTS     = 10
+  let reconnects = 0
+  let destroyed  = false
 
-  pythonReq.on('error', () => {
-    if (!headersSent && !res.headersSent) {
-      res.status(503).send(
-        'Stream offline — make sure multiple_tracking.py is running on port 5001'
-      )
-    } else {
-      res.destroy()
-    }
+  // Clean up everything if the browser disconnects
+  req.on('close', () => {
+    destroyed = true
   })
 
-  req.on('close', () => pythonReq.destroy())
+  function connectToPython () {
+    if (destroyed) return
+
+    const pythonReq = http.get(
+      `http://${PYTHON_HOST}:${PYTHON_PORT}/video_feed`,
+      (pRes) => {
+        // First successful connection — forward headers once
+        if (!res.headersSent) {
+          res.writeHead(pRes.statusCode, {
+            ...pRes.headers,
+            'Access-Control-Allow-Origin': '*',
+          })
+        }
+        reconnects = 0  // reset counter on successful connection
+
+        pRes.on('data', (chunk) => {
+          if (!destroyed) {
+            try { res.write(chunk) } catch (_) { destroyed = true }
+          }
+        })
+
+        pRes.on('end', () => {
+          if (!destroyed) tryReconnect()
+        })
+
+        pRes.on('error', () => {
+          if (!destroyed) tryReconnect()
+        })
+      }
+    )
+
+    pythonReq.on('error', () => {
+      if (!res.headersSent && !res.writableEnded) {
+        res.status(503).send('Stream offline — make sure multiple_tracking.py is running on port 5001')
+        destroyed = true
+      } else {
+        tryReconnect()
+      }
+    })
+
+    req.on('close', () => pythonReq.destroy())
+  }
+
+  function tryReconnect () {
+    if (destroyed || reconnects >= MAX_RECONNECTS) {
+      if (!res.writableEnded) res.end()
+      return
+    }
+    reconnects++
+    setTimeout(connectToPython, RECONNECT_DELAY_MS)
+  }
+
+  connectToPython()
 })
 
 // ── SPA fallback — serve index.html for all other routes ─────────────────────
