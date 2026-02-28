@@ -1,6 +1,5 @@
 <template>
   <div class="sidebar-wrapper">
-    <!-- Desktop Sidebar -->
     <Teleport to="body" v-if="isMounted">
       <Transition name="sidebar-fade">
         <div
@@ -13,7 +12,6 @@
           @mouseenter="open = true"
           @mouseleave="open = false"
         >
-          <!-- Position Toggle Button -->
           <button 
             class="position-toggle-btn"
             @click="toggleSidebarPosition"
@@ -29,7 +27,6 @@
       </Transition>
     </Teleport>
 
-    <!-- Mobile Sidebar Toggle -->
     <div class="mobile-sidebar-header" v-if="!isDesktop">
       <button
         class="mobile-menu-btn"
@@ -41,7 +38,6 @@
       </button>
     </div>
 
-    <!-- Mobile Sidebar Panel -->
     <Teleport to="body" v-if="isMounted">
       <Transition name="mobile-slide">
         <div v-if="open && !isDesktop" class="mobile-sidebar-panel">
@@ -56,7 +52,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, provide, Ref } from 'vue'
+import { ref, onMounted, onUnmounted, computed, provide, Ref } from 'vue'
 import { Menu as MenuIcon, X as XIcon, ChevronLeft, ChevronRight } from 'lucide-vue-next'
 
 interface Props {
@@ -80,20 +76,8 @@ provide('sidebarAnimate', ref(props.animate) as Ref<boolean>)
 
 const toggleSidebarPosition = () => {
   sidebarPosition.value = sidebarPosition.value === 'left' ? 'right' : 'left'
-  // Store the position in localStorage so it persists across page reloads
   localStorage.setItem('sidebarPosition', sidebarPosition.value)
 }
-
-onMounted(() => {
-  isMounted.value = true
-  // Load sidebar position from localStorage
-  const savedPosition = localStorage.getItem('sidebarPosition') as 'left' | 'right' | null
-  if (savedPosition) {
-    sidebarPosition.value = savedPosition
-  }
-  checkScreenSize()
-  window.addEventListener('resize', checkScreenSize)
-})
 
 const checkScreenSize = () => {
   isDesktop.value = window.innerWidth >= 768
@@ -102,11 +86,19 @@ const checkScreenSize = () => {
   }
 }
 
+onMounted(() => {
+  isMounted.value = true
+  const savedPosition = localStorage.getItem('sidebarPosition') as 'left' | 'right' | null
+  if (savedPosition) {
+    sidebarPosition.value = savedPosition
+  }
+  checkScreenSize()
+  window.addEventListener('resize', checkScreenSize)
+})
+
 onUnmounted(() => {
   window.removeEventListener('resize', checkScreenSize)
 })
-
-import { onUnmounted } from 'vue'
 </script>
 
 <style scoped>
@@ -246,7 +238,6 @@ import { onUnmounted } from 'vue'
   }
 }
 
-/* Transitions */
 .sidebar-fade-enter-active,
 .sidebar-fade-leave-active {
   transition: opacity 0.3s ease;
