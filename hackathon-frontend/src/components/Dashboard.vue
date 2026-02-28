@@ -33,6 +33,18 @@ const detectedPeople = ref([
           <li>Settings</li>
         </ul>
       </nav>
+
+      <!-- Recent Access Logs in Sidebar -->
+      <div class="sidebar-logs">
+        <h4>Recent Access Logs</h4>
+        <div class="logs-container">
+          <div v-for="person in people" :key="person.id" class="log-item">
+            <div class="log-name">{{ person.name }}</div>
+            <div class="log-status" :class="person.status.toLowerCase()">{{ person.status }}</div>
+            <div class="log-time">{{ person.time }}</div>
+          </div>
+        </div>
+      </div>
     </aside>
 
     <!-- Main Content -->
@@ -43,28 +55,30 @@ const detectedPeople = ref([
         <button class="login-btn">Login</button>
       </header>
 
+      <!-- Tabs for Live Feed and Detected People -->
+      <div class="main-tabs">
+        <button 
+          :class="['main-tab-btn', { active: activeTab === 'live' }]" 
+          @click="activeTab = 'live'"
+        >
+          Live Feed
+        </button>
+        <button 
+          :class="['main-tab-btn', { active: activeTab === 'detected' }]" 
+          @click="activeTab = 'detected'"
+        >
+          Detected People
+        </button>
+      </div>
+
       <!-- Dashboard Grid -->
       <div class="dashboard-grid">
         <!-- Live Feed Section -->
-        <div class="card camera-card">
+        <div v-if="activeTab === 'live'" class="card camera-card full-width">
           <div class="card-header">
-            <div class="tabs">
-              <button 
-                :class="['tab-btn', { active: activeTab === 'live' }]" 
-                @click="activeTab = 'live'"
-              >
-                Live Feed
-              </button>
-              <button 
-                :class="['tab-btn', { active: activeTab === 'detected' }]" 
-                @click="activeTab = 'detected'"
-              >
-                Detected People
-              </button>
-            </div>
-            <span v-if="activeTab === 'live'" class="live-indicator">● LIVE</span>
+            <span class="live-indicator">● LIVE</span>
           </div>
-          <div v-if="activeTab === 'live'" class="video-placeholder">
+          <div class="video-placeholder">
             <div class="camera-overlay">
               <p>Camera 01 - Main Entrance</p>
             </div>
@@ -74,7 +88,14 @@ const detectedPeople = ref([
               <p>Video Feed Unavailable in Prototype</p>
             </div>
           </div>
-          <div v-else class="detected-container">
+        </div>
+
+        <!-- Detected People Section -->
+        <div v-if="activeTab === 'detected'" class="card detected-card full-width">
+          <div class="card-header">
+            <h3>Detected People</h3>
+          </div>
+          <div class="detected-container">
             <div v-for="person in detectedPeople" :key="person.id" class="detected-item">
               <div class="person-info">
                 <span class="person-name">{{ person.name }}</span>
@@ -82,36 +103,6 @@ const detectedPeople = ref([
               </div>
               <button v-if="person.type === 'unknown'" class="add-person-btn">Add Person</button>
             </div>
-          </div>
-        </div>
-
-        <!-- Database Section -->
-        <div class="card database-card">
-          <div class="card-header">
-            <h3>Recent Access Logs</h3>
-            <button class="view-all-btn">View All</button>
-          </div>
-          <div class="table-container">
-            <table>
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Status</th>
-                  <th>Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="person in people" :key="person.id">
-                  <td>{{ person.name }}</td>
-                  <td>
-                    <span :class="['status-badge', person.status.toLowerCase()]">
-                      {{ person.status }}
-                    </span>
-                  </td>
-                  <td>{{ person.time }}</td>
-                </tr>
-              </tbody>
-            </table>
           </div>
         </div>
       </div>
@@ -135,11 +126,13 @@ const detectedPeople = ref([
   color: white;
   display: flex;
   flex-direction: column;
+  overflow-y: auto;
 }
 
 .logo {
   padding: 20px;
   border-bottom: 1px solid #059669;
+  flex-shrink: 0;
 }
 
 .logo h2 {
@@ -152,6 +145,7 @@ const detectedPeople = ref([
   list-style: none;
   padding: 0;
   margin: 20px 0;
+  flex-shrink: 0;
 }
 
 .sidebar nav li {
@@ -163,6 +157,75 @@ const detectedPeople = ref([
 .sidebar nav li:hover, .sidebar nav li.active {
   background-color: #059669;
   border-left: 4px solid var(--vt-c-green-light);
+}
+
+/* Sidebar Recent Access Logs */
+.sidebar-logs {
+  flex: 1;
+  padding: 20px;
+  border-top: 1px solid #059669;
+  overflow-y: auto;
+}
+
+.sidebar-logs h4 {
+  margin: 0 0 15px 0;
+  font-size: 0.95rem;
+  color: var(--vt-c-green-light);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.logs-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.log-item {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 12px;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  border-left: 3px solid var(--vt-c-green-light);
+}
+
+.log-name {
+  font-weight: 600;
+  color: white;
+  margin-bottom: 4px;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.log-status {
+  font-size: 0.75rem;
+  padding: 2px 6px;
+  border-radius: 3px;
+  display: inline-block;
+  margin-bottom: 4px;
+  background-color: rgba(255, 255, 255, 0.2);
+  color: white;
+}
+
+.log-status.authorized {
+  background-color: #86efac;
+  color: #065f46;
+}
+
+.log-status.pending {
+  background-color: #fbbf24;
+  color: #78350f;
+}
+
+.log-status.denied {
+  background-color: #f87171;
+  color: #7f1d1d;
+}
+
+.log-time {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.7);
 }
 
 /* Main Content */
@@ -208,11 +271,11 @@ const detectedPeople = ref([
 /* Dashboard Grid */
 .dashboard-grid {
   padding: 30px;
-  display: grid;
-  grid-template-columns: 1fr;
+  display: flex;
   gap: 30px;
   overflow-y: auto;
   height: 100%;
+  flex: 1;
 }
 
 .card {
@@ -222,6 +285,11 @@ const detectedPeople = ref([
   display: flex;
   flex-direction: column;
   overflow: hidden;
+}
+
+.card.full-width {
+  width: 100%;
+  flex: 1;
 }
 
 .card-header {
@@ -239,26 +307,34 @@ const detectedPeople = ref([
   color: var(--vt-c-green-dark);
 }
 
-/* Tabs */
-.tabs {
+/* Main Tabs */
+.main-tabs {
+  padding: 0 30px;
   display: flex;
-  gap: 20px;
+  gap: 30px;
+  border-bottom: 1px solid #e5e7eb;
+  background: white;
 }
 
-.tab-btn {
+.main-tab-btn {
   background: none;
   border: none;
   font-size: 1.1rem;
   font-weight: 500;
   color: #6b7280;
   cursor: pointer;
-  padding-bottom: 5px;
-  border-bottom: 2px solid transparent;
+  padding: 15px 0;
+  border-bottom: 3px solid transparent;
+  transition: all 0.2s;
 }
 
-.tab-btn.active {
+.main-tab-btn.active {
   color: var(--vt-c-green-dark);
   border-bottom-color: var(--vt-c-green-dark);
+}
+
+.main-tab-btn:hover {
+  color: var(--vt-c-green-dark);
 }
 
 /* Live Feed Specifics */
@@ -278,7 +354,7 @@ const detectedPeople = ref([
 .video-placeholder {
   background-color: #000;
   flex: 1;
-  min-height: 400px;
+  min-height: 500px;
   position: relative;
   display: flex;
   align-items: center;
@@ -304,8 +380,12 @@ const detectedPeople = ref([
 /* Detected People Tab */
 .detected-container {
   padding: 20px;
-  min-height: 400px;
+  flex: 1;
   background-color: #f9fafb;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 15px;
 }
 
 .detected-item {
@@ -313,10 +393,9 @@ const detectedPeople = ref([
   padding: 15px;
   border-radius: 8px;
   border: 1px solid #e5e7eb;
-  margin-bottom: 10px;
   display: flex;
-  justify-content: space-between;
-  align-items: center;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .person-info {
@@ -362,68 +441,18 @@ const detectedPeople = ref([
   background-color: var(--vt-c-green);
 }
 
-/* Database Specifics */
-.view-all-btn {
-  background: none;
-  border: none;
-  color: var(--vt-c-green-dark);
-  cursor: pointer;
-  font-size: 0.9rem;
-}
-
-.table-container {
-  padding: 0;
-  overflow-x: auto;
-}
-
-table {
-  width: 100%;
-  border-collapse: collapse;
-  text-align: left;
-}
-
-th {
-  background-color: #f9fafb;
-  padding: 12px 20px;
-  font-weight: 600;
-  font-size: 0.85rem;
-  color: #6b7280;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-td {
-  padding: 15px 20px;
-  border-bottom: 1px solid #e5e7eb;
-  font-size: 0.95rem;
-}
-
-.status-badge {
-  padding: 4px 8px;
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 600;
-}
-
-.status-badge.authorized {
-  background-color: #d1fae5;
-  color: #065f46;
-}
-
-.status-badge.pending {
-  background-color: #d1fae5;
-  color: #065f46;
-}
-
-.status-badge.denied {
-  background-color: #d1fae5;
-  color: #065f46;
-}
-
 /* Responsive */
 @media (max-width: 1024px) {
   .dashboard-grid {
-    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .sidebar {
+    width: 200px;
+  }
+
+  .sidebar-logs {
+    max-height: 300px;
   }
 }
 </style>
