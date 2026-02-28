@@ -121,7 +121,7 @@ const getSuspicionColor = (score: number): string => {
     <div class="analyzer-header">
       <div class="header-title">
         <Zap :size="20" style="color: #6366f1" />
-        <h3>Copilot Activity Analysis</h3>
+        <h3>Gemini Activity Analysis</h3>
       </div>
       <div class="header-stats">
         <span class="stat-badge high">

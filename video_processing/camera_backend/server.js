@@ -6,7 +6,7 @@
  * 2. Proxy the MJPEG live video stream   → Python server (:5001/video_feed)
  * 3. Serve the built Vue frontend (dist/) in production
  * 4. Face Database CRUD  (GET/POST/DELETE /face_db)
- * 5. Copilot AI analysis (POST /copilot/analyze → Azure OpenAI)
+ * 5. Gemini AI analysis (POST /gemini/analyze → Google Gemini API)
  * 6. Snapshot endpoint   (GET /snapshot → single JPEG from MJPEG stream)
  *
  * Startup order:
@@ -15,9 +15,8 @@
  * 3. npm run dev  OR  open http://localhost:8080 for the built app
  *
  * Environment variables (copy .env.example → .env):
- *   AZURE_OPENAI_ENDPOINT    e.g. https://myresource.openai.azure.com
- *   AZURE_OPENAI_API_KEY     your Azure OpenAI / Copilot API key
- *   AZURE_OPENAI_DEPLOYMENT  model deployment name (default: gpt-4o)
+ *   GEMINI_API_KEY       your Google AI Studio / Gemini API key
+ *   GEMINI_MODEL         model name (default: gemini-2.0-flash)
  */
 
 require('dotenv').config()
@@ -69,7 +68,7 @@ app.use((req, res, next) => {
 const DIST_DIR = path.join(__dirname, 'dist')
 app.use(express.static(DIST_DIR))
 
-// ── Body parser (JSON) for Copilot endpoint ───────────────────────────────────
+// ── Body parser (JSON) for Gemini endpoint ───────────────────────────────────
 app.use(express.json({ limit: '20mb' }))
 
 // ── GET /face_db — list all enrolled faces with base64 thumbnails ─────────────
@@ -155,17 +154,16 @@ app.get('/snapshot', async (req, res) => {
   res.send(buf)
 })
 
-// ── POST /copilot/analyze — analyze footage via Azure OpenAI (gpt-4o vision) ──
-app.post('/copilot/analyze', async (req, res) => {
+// ── POST /gemini/analyze — analyze footage via Google Gemini Vision ──────────
+app.post('/gemini/analyze', async (req, res) => {
   const { subject, coords } = req.body ?? {}
 
-  const apiKey    = process.env.AZURE_OPENAI_API_KEY
-  const endpoint  = (process.env.AZURE_OPENAI_ENDPOINT ?? '').replace(/\/$/, '')
-  const deployment = process.env.AZURE_OPENAI_DEPLOYMENT || 'gpt-4o'
+  const apiKey   = process.env.GEMINI_API_KEY
+  const model    = process.env.GEMINI_MODEL || 'gemini-2.0-flash'
 
-  if (!apiKey || !endpoint) {
+  if (!apiKey) {
     return res.status(503).json({
-      error: 'Copilot API not configured. Set AZURE_OPENAI_API_KEY and AZURE_OPENAI_ENDPOINT in your .env file.'
+      error: 'Gemini API not configured. Set GEMINI_API_KEY in your .env file.'
     })
   }
 
@@ -176,38 +174,31 @@ app.post('/copilot/analyze', async (req, res) => {
     ? ` The person is located at pixel position (${coords.center_x}, ${coords.center_y}) with a bounding box of ${coords.w}×${coords.h}px.`
     : ''
 
-  const isUnknown  = !subject || subject === 'Unknown Person'
-  const subjectDesc = isUnknown ? 'an unrecognized individual' : `the identified individual "${subject}"`
-
-  const systemPrompt =
+  const isUnknown   = !subject || subject === 'Unknown Person'
+  const systemText  =
     'You are a security intelligence analyst reviewing live surveillance footage. ' +
     'Analyze the provided camera frame and describe the person\'s behavior, body language, ' +
     'apparent activity, clothing, and any notable or potentially suspicious characteristics. ' +
     'Be concise, professional, and factual. Structure your response as a brief security report.'
 
   const userText =
+    systemText + '\n\n' +
     `Analyze this security camera frame. ${isUnknown ? 'An UNRECOGNIZED person' : `Person identified as "${subject}"`} ` +
     `has been flagged by the detection system.${positionNote} ` +
     `Provide a behavioral analysis and summarize what this person appears to be doing.`
 
-  const contentParts = snapshotB64
-    ? [
-        { type: 'text', text: userText },
-        { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${snapshotB64}`, detail: 'high' } }
-      ]
-    : userText  // fallback: text-only if stream is offline
+  const parts = [{ text: userText }]
+  if (snapshotB64) {
+    parts.push({ inline_data: { mime_type: 'image/jpeg', data: snapshotB64 } })
+  }
 
   const body = JSON.stringify({
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user',   content: contentParts }
-    ],
-    max_tokens:  600,
-    temperature: 0.3,
+    contents: [{ parts }],
+    generationConfig: { maxOutputTokens: 600, temperature: 0.3 },
   })
 
   const apiUrl = new URL(
-    `${endpoint}/openai/deployments/${deployment}/chat/completions?api-version=2024-02-01`
+    `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
   )
 
   const options = {
@@ -216,29 +207,27 @@ app.post('/copilot/analyze', async (req, res) => {
     method:   'POST',
     headers: {
       'Content-Type':   'application/json',
-      'api-key':        apiKey,
       'Content-Length': Buffer.byteLength(body),
     },
   }
 
-  const proto = apiUrl.protocol === 'https:' ? https : http
-  const azureReq = proto.request(options, azureRes => {
+  const geminiReq = https.request(options, geminiRes => {
     let raw = ''
-    azureRes.on('data', c => raw += c)
-    azureRes.on('end', () => {
+    geminiRes.on('data', c => raw += c)
+    geminiRes.on('end', () => {
       try {
         const parsed = JSON.parse(raw)
         if (parsed.error) return res.status(500).json({ error: parsed.error.message })
-        const analysis = parsed.choices?.[0]?.message?.content?.trim() ?? 'No analysis returned.'
+        const analysis = parsed.candidates?.[0]?.content?.parts?.[0]?.text?.trim() ?? 'No analysis returned.'
         res.json({ analysis })
       } catch {
-        res.status(500).json({ error: 'Failed to parse Copilot response.' })
+        res.status(500).json({ error: 'Failed to parse Gemini response.' })
       }
     })
   })
-  azureReq.on('error', e => res.status(500).json({ error: e.message }))
-  azureReq.write(body)
-  azureReq.end()
+  geminiReq.on('error', e => res.status(500).json({ error: e.message }))
+  geminiReq.write(body)
+  geminiReq.end()
 })
 
 // ── Internal helper: proxy a JSON request to Python ──────────────────────────
@@ -283,7 +272,7 @@ app.get('/health', (req, res) => {
   proxyJSON('/health', res, {
     status:     'offline',
     identities: 0,
-    copilot_enabled: false,
+    gemini_enabled: false,
     suspicious_activities: 0,
     _offline:   true,
   })
@@ -416,14 +405,14 @@ app.listen(SERVER_PORT, () => {
   console.log('║  GET  /face_db         List enrolled faces                    ║')
   console.log('║  POST /face_db/upload  Add images to face database            ║')
   console.log('║  DEL  /face_db/:f      Remove face from database              ║')
-  console.log('║  POST /copilot/analyze AI behavioral analysis                 ║')
+  console.log('║  POST /gemini/analyze  AI behavioral analysis                 ║')
   console.log('╠═══════════════════════════════════════════════════════════════╣')
   console.log('║  Dev mode: npm run dev  (Vite on :5173, proxies to here)      ║')
   console.log('╚═══════════════════════════════════════════════════════════════╝')
   console.log('')
   console.log('  ⚠  Start multiple_tracking.py first!')
-  if (!process.env.AZURE_OPENAI_API_KEY) {
-    console.log('  ⚠  AZURE_OPENAI_API_KEY not set — Copilot analysis disabled')
+  if (!process.env.GEMINI_API_KEY) {
+    console.log('  ⚠  GEMINI_API_KEY not set — Gemini analysis disabled')
   }
   console.log('')
 })

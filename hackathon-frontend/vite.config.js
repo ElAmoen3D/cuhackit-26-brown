@@ -21,10 +21,10 @@ export default defineConfig({
       },
 
       // ── Node Express server (port 8080) ───────────────────────────────────
-      // Face database CRUD + Copilot AI analysis + single-frame snapshot
+      // Face database CRUD + Gemini AI analysis + single-frame snapshot
       '/face_db':        'http://localhost:8080',
       '/snapshot':       'http://localhost:8080',
-      '/copilot':        'http://localhost:8080',
+      '/gemini':         'http://localhost:8080',
     }
   }
 })

@@ -224,32 +224,32 @@ async function uploadFaceDbFiles(files: File[]): Promise<void> {
   await fetchFaceDb()
 }
 
-// ── Copilot AI Analysis ───────────────────────────────────────────────────────
-const showCopilotModal = ref(false)
-const copilotLoading   = ref(false)
-const copilotResult    = ref<string | null>(null)
-const copilotSubject   = ref<string>('')
-const copilotError     = ref<string | null>(null)
+// ── Gemini AI Analysis ───────────────────────────────────────────────────────
+const showGeminiModal = ref(false)
+const geminiLoading   = ref(false)
+const geminiResult    = ref<string | null>(null)
+const geminiSubject   = ref<string>('')
+const geminiError     = ref<string | null>(null)
 
-async function analyzWithCopilot(person: { name: string; coords: FaceCoords | null }): Promise<void> {
-  copilotSubject.value   = person.name
-  copilotResult.value    = null
-  copilotError.value     = null
-  copilotLoading.value   = true
-  showCopilotModal.value = true
+async function analyzWithGemini(person: { name: string; coords: FaceCoords | null }): Promise<void> {
+  geminiSubject.value   = person.name
+  geminiResult.value    = null
+  geminiError.value     = null
+  geminiLoading.value   = true
+  showGeminiModal.value = true
   try {
-    const res = await fetch('/copilot/analyze', {
+    const res = await fetch('/gemini/analyze', {
       method:  'POST',
       headers: { 'Content-Type': 'application/json' },
       body:    JSON.stringify({ subject: person.name, coords: person.coords }),
     })
     const data = await res.json()
     if (!res.ok || data.error) throw new Error(data.error ?? 'Request failed')
-    copilotResult.value = data.analysis
+    geminiResult.value = data.analysis
   } catch (err: any) {
-    copilotError.value = err.message ?? 'Analysis failed'
+    geminiError.value = err.message ?? 'Analysis failed'
   } finally {
-    copilotLoading.value = false
+    geminiLoading.value = false
   }
 }
 
@@ -327,7 +327,7 @@ onUnmounted(() => {
 
         <li :class="{ active: currentPage === 'activity' }"
             @click="currentPage = 'activity'"
-            title="Copilot Activity Analysis">
+            title="Gemini Activity Analysis">
           <component :is="Zap" :size="20" />
         </li>
 
@@ -377,7 +377,7 @@ onUnmounted(() => {
           </div>
           <h1 v-if="currentPage === 'dashboard'">Dashboard</h1>
           <h1 v-else-if="currentPage === 'logs'">Access Logs</h1>
-          <h1 v-else-if="currentPage === 'activity'">Copilot Activity Analysis</h1>
+          <h1 v-else-if="currentPage === 'activity'">Gemini Activity Analysis</h1>
           <h1 v-else-if="currentPage === 'signal'">Signal Intelligence</h1>
           <h1 v-else-if="currentPage === 'monitor'">System Monitor</h1>
           <h1 v-else>Threat Shield</h1>
@@ -663,8 +663,8 @@ onUnmounted(() => {
 
                   <button
                     class="ipl-ai-btn"
-                    title="Analyze with Copilot"
-                    @click="analyzWithCopilot(person)"
+                    title="Analyze with Gemini"
+                    @click="analyzWithGemini(person)"
                   >
                     <component :is="Bot" :size="12" />
                   </button>
@@ -751,8 +751,8 @@ onUnmounted(() => {
                   </button>
                   <button
                     class="analyze-ai-btn"
-                    title="Analyze with Microsoft Copilot"
-                    @click="analyzWithCopilot(person)"
+                    title="Analyze with Gemini"
+                    @click="analyzWithGemini(person)"
                   >
                     <component :is="Bot" :size="14" />
                     Analyze
@@ -1047,42 +1047,42 @@ onUnmounted(() => {
       </div>
     </Teleport>
 
-    <!-- ── COPILOT AI ANALYSIS MODAL ─────────────────────────────── -->
+    <!-- -- GEMINI AI ANALYSIS MODAL -- -->
     <Teleport to="body">
-      <div v-if="showCopilotModal" class="copilot-backdrop" @click.self="showCopilotModal = false">
-        <div class="copilot-modal">
-          <div class="copilot-header">
-            <div class="copilot-title-row">
-              <component :is="Bot" :size="18" class="copilot-bot-icon" />
-              <span class="copilot-title-text">AI Analysis</span>
-              <span class="copilot-brand">Microsoft Copilot</span>
+      <div v-if="showGeminiModal" class="gemini-backdrop" @click.self="showGeminiModal = false">
+        <div class="gemini-modal">
+          <div class="gemini-header">
+            <div class="gemini-title-row">
+              <component :is="Bot" :size="18" class="gemini-bot-icon" />
+              <span class="gemini-title-text">AI Analysis</span>
+              <span class="gemini-brand">Google Gemini</span>
             </div>
-            <button class="pm-close" @click="showCopilotModal = false">
+            <button class="pm-close" @click="showGeminiModal = false">
               <component :is="X" :size="18" />
             </button>
           </div>
-          <div class="copilot-body">
-            <div class="copilot-subject-row">
-              <span class="copilot-subject-label">Subject</span>
-              <span :class="['copilot-subject-val', copilotSubject === 'Unknown Person' || !copilotSubject ? 'unknown' : 'known']">
-                {{ copilotSubject || 'Unknown' }}
+          <div class="gemini-body">
+            <div class="gemini-subject-row">
+              <span class="gemini-subject-label">Subject</span>
+              <span :class="['gemini-subject-val', geminiSubject === 'Unknown Person' || !geminiSubject ? 'unknown' : 'known']">
+                {{ geminiSubject || 'Unknown' }}
               </span>
             </div>
-            <div v-if="copilotLoading" class="copilot-loading">
-              <div class="copilot-dots"><span></span><span></span><span></span></div>
-              <p class="copilot-loading-label">Analyzing footage with Microsoft Copilot…</p>
+            <div v-if="geminiLoading" class="gemini-loading">
+              <div class="gemini-dots"><span></span><span></span><span></span></div>
+              <p class="gemini-loading-label">Analyzing footage with Gemini…</p>
             </div>
-            <div v-else-if="copilotError" class="copilot-error">
+            <div v-else-if="geminiError" class="gemini-error">
               <component :is="AlertTriangle" :size="18" />
               <div>
-                <p class="copilot-err-title">Analysis Failed</p>
-                <p class="copilot-err-msg">{{ copilotError }}</p>
+                <p class="gemini-err-title">Analysis Failed</p>
+                <p class="gemini-err-msg">{{ geminiError }}</p>
               </div>
             </div>
-            <div v-else-if="copilotResult" class="copilot-result-wrap">
-              <p class="copilot-result-label">Behavioral Analysis Report</p>
-              <div class="copilot-result-text">{{ copilotResult }}</div>
-              <div class="copilot-timestamp">Generated by Microsoft Copilot (Azure OpenAI)</div>
+            <div v-else-if="geminiResult" class="gemini-result-wrap">
+              <p class="gemini-result-label">Behavioral Analysis Report</p>
+              <div class="gemini-result-text">{{ geminiResult }}</div>
+              <div class="gemini-timestamp">Generated by Google Gemini</div>
             </div>
           </div>
         </div>
@@ -2465,14 +2465,14 @@ tr:hover td { background: var(--surface-2); }
 .facedb-uploading { color: var(--green); font-weight: 600; }
 .facedb-file-input { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; pointer-events: none; }
 
-/* ── COPILOT MODAL ───────────────────────────────────────────────────────── */
-.copilot-backdrop {
+/* -- GEMINI MODAL -- */
+.gemini-backdrop {
   position: fixed; inset: 0;
   background: rgba(0,0,0,0.65); backdrop-filter: blur(4px);
   z-index: 9999;
   display: flex; align-items: center; justify-content: center;
 }
-.copilot-modal {
+.gemini-modal {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 14px;
@@ -2481,66 +2481,66 @@ tr:hover td { background: var(--surface-2); }
   overflow: hidden;
   box-shadow: 0 24px 64px rgba(0,0,0,0.75);
 }
-.copilot-header {
+.gemini-header {
   display: flex; align-items: center; justify-content: space-between;
   padding: 15px 18px 13px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   background: linear-gradient(90deg, rgba(59,130,246,0.06) 0%, transparent 100%);
 }
-.copilot-title-row { display: flex; align-items: center; gap: 8px; }
-.copilot-bot-icon { color: #60a5fa; }
-.copilot-title-text { font-size: 14px; font-weight: 600; color: var(--text); }
-.copilot-brand {
+.gemini-title-row { display: flex; align-items: center; gap: 8px; }
+.gemini-bot-icon { color: #60a5fa; }
+.gemini-title-text { font-size: 14px; font-weight: 600; color: var(--text); }
+.gemini-brand {
   font-size: 9.5px; font-weight: 600; color: #60a5fa;
   background: rgba(59,130,246,0.1); border: 1px solid rgba(59,130,246,0.25);
   border-radius: 4px; padding: 1px 7px; letter-spacing: 0.04em; text-transform: uppercase;
   font-family: var(--mono);
 }
-.copilot-body { padding: 16px 18px 18px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 14px; }
-.copilot-subject-row {
+.gemini-body { padding: 16px 18px 18px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 14px; }
+.gemini-subject-row {
   display: flex; align-items: center; gap: 10px;
   padding: 9px 13px; background: var(--surface-2);
   border: 1px solid var(--border-soft); border-radius: 7px;
 }
-.copilot-subject-label {
+.gemini-subject-label {
   font-size: 9.5px; font-weight: 600; text-transform: uppercase;
   letter-spacing: 0.1em; color: var(--text-muted);
   font-family: var(--mono); flex-shrink: 0;
 }
-.copilot-subject-val { font-size: 13px; font-weight: 600; color: var(--text); }
-.copilot-subject-val.unknown { color: #f87171; }
-.copilot-subject-val.known   { color: #4ade80; }
-.copilot-loading { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 36px 0; }
-.copilot-dots { display: flex; gap: 6px; }
-.copilot-dots span {
+.gemini-subject-val { font-size: 13px; font-weight: 600; color: var(--text); }
+.gemini-subject-val.unknown { color: #f87171; }
+.gemini-subject-val.known   { color: #4ade80; }
+.gemini-loading { display: flex; flex-direction: column; align-items: center; gap: 16px; padding: 36px 0; }
+.gemini-dots { display: flex; gap: 6px; }
+.gemini-dots span {
   width: 8px; height: 8px; background: #60a5fa;
-  border-radius: 50%; animation: copilot-pulse 1.2s ease-in-out infinite;
+  border-radius: 50%; animation: gemini-pulse 1.2s ease-in-out infinite;
 }
-.copilot-dots span:nth-child(2) { animation-delay: 0.2s; }
-.copilot-dots span:nth-child(3) { animation-delay: 0.4s; }
-@keyframes copilot-pulse { 0%, 100% { opacity: 0.25; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.1); } }
-.copilot-loading-label { font-size: 12px; color: var(--text-muted); text-align: center; }
-.copilot-error {
+.gemini-dots span:nth-child(2) { animation-delay: 0.2s; }
+.gemini-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes gemini-pulse { 0%, 100% { opacity: 0.25; transform: scale(0.8); } 50% { opacity: 1; transform: scale(1.1); } }
+.gemini-loading-label { font-size: 12px; color: var(--text-muted); text-align: center; }
+.gemini-error {
   display: flex; align-items: flex-start; gap: 12px;
   padding: 13px 14px;
   background: rgba(239,68,68,0.08); border: 1px solid rgba(239,68,68,0.25);
   border-radius: 8px; color: var(--accent);
 }
-.copilot-err-title { font-size: 13px; font-weight: 600; color: #f87171; margin-bottom: 4px; }
-.copilot-err-msg   { font-size: 11.5px; color: var(--text-muted); font-family: var(--mono); }
-.copilot-result-wrap { display: flex; flex-direction: column; gap: 10px; }
-.copilot-result-label {
+.gemini-err-title { font-size: 13px; font-weight: 600; color: #f87171; margin-bottom: 4px; }
+.gemini-err-msg   { font-size: 11.5px; color: var(--text-muted); font-family: var(--mono); }
+.gemini-result-wrap { display: flex; flex-direction: column; gap: 10px; }
+.gemini-result-label {
   font-size: 9.5px; font-weight: 600; text-transform: uppercase;
   letter-spacing: 0.1em; color: var(--text-muted); font-family: var(--mono);
 }
-.copilot-result-text {
+.gemini-result-text {
   background: var(--surface-2); border: 1px solid var(--border-soft);
   border-left: 3px solid #3b82f6; border-radius: 8px;
   padding: 14px; font-size: 13px; line-height: 1.65; color: #d4d4e0;
   white-space: pre-wrap;
 }
-.copilot-timestamp { font-size: 9.5px; color: var(--text-muted); font-family: var(--mono); text-align: right; }
+.gemini-timestamp { font-size: 9.5px; color: var(--text-muted); font-family: var(--mono); text-align: right; }
 
 /* ── SCROLLBARS ─────────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar       { width: 4px; height: 4px; }

@@ -52,8 +52,7 @@ if %errorlevel%==0 (
     goto keep_alive
 ) else (
     echo Wrong subdomain assigned — killing tunnel and retrying in 3s...
-    for /f "tokens=5" %%p in ('netstat -ano ^| findstr ":8080 " ^| findstr ESTABLISHED') do taskkill /F /PID %%p >nul 2>&1
-    taskkill /F /IM node.exe /FI "WINDOWTITLE eq *localtunnel*" >nul 2>&1
+    powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.Name -eq 'node.exe' -and $_.CommandLine -like '*localtunnel*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
     del /f /q %TUNNEL_OUT% >nul 2>&1
     timeout /t 3 /nobreak >nul
     goto tunnel_retry

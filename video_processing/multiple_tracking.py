@@ -42,11 +42,11 @@ except Exception as import_error:
     DEEPFACE_IMPORT_ERROR = import_error
 
 try:
-    from copilot_analyzer import get_analyzer
-    COPILOT_AVAILABLE = True
+    from gemini_analyzer import get_analyzer
+    GEMINI_AVAILABLE = True
 except ImportError:
-    COPILOT_AVAILABLE = False
-    logging.warning("Copilot analyzer not available - install httpx")
+    GEMINI_AVAILABLE = False
+    logging.warning("Gemini analyzer not available - install google-generativeai pillow")
 
 # Configure logging
 logging.basicConfig(
@@ -70,7 +70,7 @@ UNKNOWN_CONFIRM_FRAMES = 60  # Frames a face must stay UNKNOWN before being surf
 # ── Brightness Auto-Adjustment ────────────────────────────────────────────────
 # Set TARGET_BRIGHTNESS to a value 0–255 to automatically scale each frame so
 # its mean luminance matches that level.  Set to -1 to disable.
-TARGET_BRIGHTNESS = 50   # ← change this value to control target brightness
+TARGET_BRIGHTNESS = 50   # ← change this value to  control target brightness
 
 # --- DNN Face Detector ---
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -97,13 +97,20 @@ alert_log           = deque(maxlen=25)
 REFERENCE_DATA      = []
 MODEL_LOCK          = threading.Lock()
 
-# ── Copilot Activity Analysis ─────────────────────────────────────────────────
-COPILOT_API_KEY          = os.environ.get("COPILOT_API_KEY", "")
-COPILOT_MODEL            = os.environ.get("COPILOT_MODEL", "gpt-4o")
-activity_analysis_enabled = COPILOT_AVAILABLE and bool(COPILOT_API_KEY)
+# ── Gemini Activity Analysis ──────────────────────────────────────────────────
+GEMINI_API_KEY            = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL              = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+activity_analysis_enabled = GEMINI_AVAILABLE and bool(GEMINI_API_KEY)
 suspicious_activities_log = deque(maxlen=100)
-copilot_analyzer          = None
-unknown_face_crops        = {}
+gemini_analyzer           = None
+
+# ── 10-second video buffer per unknown face ───────────────────────────────────
+# Each entry: {'frames': [(timestamp, crop_ndarray), ...], 'start_time': float}
+# Frames are sampled at ~1 fps so the buffer stays small.
+GEMINI_BUFFER_SECONDS = 10    # Collect this many seconds before calling Gemini
+GEMINI_SAMPLE_FRAMES  = 8     # Evenly-sampled frames sent in one API request
+unknown_face_buffers  = {}    # face_id -> buffer dict
+activity_processing   = set() # face IDs currently being analyzed (global)
 
 # ── THREADING HTTP SERVER ──────────────────────────────────────────────────────
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
@@ -172,7 +179,7 @@ class APIHandler(BaseHTTPRequestHandler):
             self._send_json(json.dumps({
                 "status":     "online",
                 "identities": len(REFERENCE_DATA),
-                "copilot_enabled": activity_analysis_enabled,
+                "gemini_enabled": activity_analysis_enabled,
                 "suspicious_activities": len(suspicious_activities_log),
                 "timestamp":  time.time(),
             }))
@@ -401,29 +408,44 @@ def identify_face(face_crop):
     except Exception:
         return "UNKNOWN"
 
-async def analyze_unknown_activity(face_id: str, face_crop, coordinates: Dict, frame_timestamp: float):
+async def analyze_unknown_activity(face_id: str, face_crops: list, coordinates: Dict, frame_timestamp: float):
     """
-    Analyze suspicious activity for unknown face using Copilot.
-    Runs asynchronously to avoid blocking video processing.
+    Analyze suspicious activity for an unknown face using a 10-second video buffer.
+    Encodes all sampled crops to JPEG and sends them in a single Gemini request.
+    Removes the face from activity_processing when done so the next buffer window
+    can begin.
     """
-    if not activity_analysis_enabled or not copilot_analyzer:
+    global activity_processing
+
+    if not activity_analysis_enabled or not gemini_analyzer:
+        activity_processing.discard(face_id)
         return
-    
+
     try:
-        # Encode face crop to JPEG bytes
-        ret, jpeg_bytes = cv2.imencode('.jpg', face_crop)
-        if not ret:
+        # Encode every sampled crop to JPEG bytes
+        frame_bytes_list = []
+        for crop in face_crops:
+            ret, jpeg_bytes = cv2.imencode('.jpg', crop)
+            if ret:
+                frame_bytes_list.append(jpeg_bytes.tobytes())
+
+        if not frame_bytes_list:
+            activity_processing.discard(face_id)
             return
-        
-        # Call Copilot analyzer
-        analysis = await copilot_analyzer.analyze_activity_async(
-            jpeg_bytes.tobytes(),
+
+        logger.info(
+            f"Sending {len(frame_bytes_list)}-frame video chunk for face {face_id} to Gemini..."
+        )
+
+        # Call the multi-frame (video chunk) analyzer
+        analysis = await gemini_analyzer.analyze_video_chunk_async(
+            frame_bytes_list,
             face_id,
             "UNKNOWN",
             coordinates,
             frame_timestamp
         )
-        
+
         # Log if suspicious
         if analysis.get('is_suspicious', False):
             suspicious_log_entry = {
@@ -435,19 +457,23 @@ async def analyze_unknown_activity(face_id: str, face_crop, coordinates: Dict, f
                 'timestamp': frame_timestamp,
                 'time_str': time.strftime("%H:%M:%S", time.localtime(frame_timestamp))
             }
-            
             with state_lock:
                 suspicious_activities_log.append(suspicious_log_entry)
-            
             logger.warning(
                 f"SUSPICIOUS ACTIVITY DETECTED: {face_id} "
                 f"(Score: {analysis['suspicion_score']:.2f}, Risk: {analysis.get('risk_level')})"
             )
         else:
-            logger.info(f"Activity analysis for {face_id}: Not suspicious (Score: {analysis['suspicion_score']:.2f})")
-            
+            logger.info(
+                f"Activity analysis for {face_id}: Not suspicious "
+                f"(Score: {analysis['suspicion_score']:.2f})"
+            )
+
     except Exception as e:
         logger.error(f"Error analyzing activity for {face_id}: {e}")
+    finally:
+        # Always ungate the face so the next 10-second window can start
+        activity_processing.discard(face_id)
 
 def face_worker(task_queue, result_queue):
     while True:
@@ -541,22 +567,22 @@ def open_camera():
 
 def main():
     global latest_known, latest_unknown, latest_counts, latest_frame_bytes, latest_frame_np, alert_log
-    global copilot_analyzer, activity_analysis_enabled
+    global gemini_analyzer, activity_analysis_enabled
 
     if DeepFace is None:
         print(f"Error: DeepFace failed to import.\nDetails: {DEEPFACE_IMPORT_ERROR}\nFix: pip install tf-keras deepface")
         return
 
-    # Initialize Copilot analyzer if enabled
+    # Initialize Gemini analyzer if enabled
     if activity_analysis_enabled:
         try:
-            copilot_analyzer = get_analyzer(COPILOT_API_KEY, COPILOT_MODEL)
-            logger.info("Copilot activity analyzer initialized successfully")
-            print("✓ Copilot activity detection ENABLED")
+            gemini_analyzer = get_analyzer(GEMINI_API_KEY, GEMINI_MODEL)
+            logger.info("Gemini activity analyzer initialized successfully")
+            print("✓ Gemini activity detection ENABLED")
         except Exception as e:
-            logger.warning(f"Failed to initialize Copilot analyzer: {e}")
+            logger.warning(f"Failed to initialize Gemini analyzer: {e}")
             activity_analysis_enabled = False
-            print("✗ Copilot activity detection DISABLED")
+            print("✗ Gemini activity detection DISABLED")
 
     precompute_db()
 
@@ -580,7 +606,6 @@ def main():
     task_queue = queue.Queue(maxsize=MAX_WORKERS)
     result_queue = queue.Queue()
     active_processing = set()
-    activity_processing = set()  # Track faces being analyzed for activity
 
     for _ in range(MAX_WORKERS):
         t = threading.Thread(target=face_worker, args=(task_queue, result_queue), daemon=True)
@@ -639,9 +664,9 @@ def main():
             except queue.Empty:
                 break
 
-        # 4. Trigger new AI jobs
+        # 4. Trigger new AI jobs (DeepFace identification)
         for face_id, data in tracked_people.items():
-            if face_id in active_processing: continue 
+            if face_id in active_processing: continue
             if (frame_count - data.get("last_verified", 0)) >= VERIFICATION_FREQ and not task_queue.full():
                 face_crop = crop_with_margin(frame, data["box"], margin_ratio=0.25)
                 if face_crop.size > 0:
@@ -649,45 +674,70 @@ def main():
                         task_queue.put_nowait((face_id, face_crop.copy()))
                         active_processing.add(face_id)
                         tracked_people[face_id]["last_verified"] = frame_count
-                        
-                        # Store crop for activity analysis if unknown
-                        if data["name"] == "UNKNOWN" or (activity_analysis_enabled and face_id not in activity_processing):
-                            unknown_face_crops[face_id] = face_crop.copy()
                     except queue.Full:
                         pass
-            
-            # Trigger Copilot activity analysis for confirmed unknown faces only
-            if (activity_analysis_enabled and 
-                face_id not in activity_processing and 
+
+            # ── 10-second frame buffering for Gemini video-chunk analysis ──────
+            # Only buffer confirmed unknown faces that are not already being analysed
+            if (activity_analysis_enabled and
                 data["name"] == "UNKNOWN" and
                 data.get("unknown_frames", 0) >= UNKNOWN_CONFIRM_FRAMES and
-                face_id in unknown_face_crops):
-                
-                try:
-                    x, y, w, h = data["box"]
-                    cx, cy = int(x + w/2), int(y + h/2)
-                    coords = {"x": int(x), "y": int(y), "w": int(w), "h": int(h), "center_x": cx, "center_y": cy}
-                    
-                    # Run async activity analysis in a background thread
-                    face_crop = unknown_face_crops[face_id]
-                    _fid, _crop, _coords, _ts = face_id, face_crop.copy(), coords, time.time()
-                    threading.Thread(
-                        target=lambda fi=_fid, fc=_crop, co=_coords, ts=_ts: asyncio.run(
-                            analyze_unknown_activity(fi, fc, co, ts)
-                        ),
-                        daemon=True
-                    ).start()
-                    activity_processing.add(face_id)
-                    
-                    # Clean up old crops
-                    if len(unknown_face_crops) > 100:
-                        oldest_id = list(unknown_face_crops.keys())[0]
-                        del unknown_face_crops[oldest_id]
-                        if oldest_id in activity_processing:
-                            activity_processing.discard(oldest_id)
-                            
-                except Exception as e:
-                    logger.error(f"Error triggering activity analysis: {e}")
+                face_id not in activity_processing):
+
+                now = time.time()
+
+                # Initialise buffer the first time we see this confirmed unknown
+                if face_id not in unknown_face_buffers:
+                    unknown_face_buffers[face_id] = {"frames": [], "start_time": now}
+
+                buf = unknown_face_buffers[face_id]
+
+                # Sample ~1 frame per second to keep memory low
+                if not buf["frames"] or (now - buf["frames"][-1][0]) >= 1.0:
+                    face_crop = crop_with_margin(frame, data["box"], margin_ratio=0.25)
+                    if face_crop.size > 0:
+                        buf["frames"].append((now, face_crop.copy()))
+
+                # After GEMINI_BUFFER_SECONDS have elapsed, fire a single API request
+                elapsed = now - buf["start_time"]
+                if elapsed >= GEMINI_BUFFER_SECONDS and len(buf["frames"]) >= 2:
+                    try:
+                        frames = buf["frames"]
+                        # Evenly sample up to GEMINI_SAMPLE_FRAMES frames
+                        if len(frames) > GEMINI_SAMPLE_FRAMES:
+                            indices = np.linspace(0, len(frames) - 1, GEMINI_SAMPLE_FRAMES, dtype=int)
+                            sampled_crops = [frames[i][1] for i in indices]
+                        else:
+                            sampled_crops = [f[1] for f in frames]
+
+                        x, y, w, h = data["box"]
+                        cx, cy = int(x + w / 2), int(y + h / 2)
+                        coords = {"x": int(x), "y": int(y), "w": int(w), "h": int(h),
+                                  "center_x": cx, "center_y": cy}
+
+                        _fid, _crops, _coords, _ts = face_id, sampled_crops, coords, now
+                        threading.Thread(
+                            target=lambda fi=_fid, fc=_crops, co=_coords, ts=_ts: asyncio.run(
+                                analyze_unknown_activity(fi, fc, co, ts)
+                            ),
+                            daemon=True
+                        ).start()
+                        activity_processing.add(face_id)
+
+                        # Clear buffer so the next 10-second window starts after analysis
+                        del unknown_face_buffers[face_id]
+
+                        logger.info(
+                            f"Triggered video-chunk analysis for {face_id} "
+                            f"({len(sampled_crops)} frames over {elapsed:.1f}s)"
+                        )
+                    except Exception as e:
+                        logger.error(f"Error triggering video chunk analysis: {e}")
+
+        # ── Prune buffers for faces that have left the frame ─────────────────
+        stale_ids = [fid for fid in list(unknown_face_buffers) if fid not in tracked_people]
+        for fid in stale_ids:
+            del unknown_face_buffers[fid]
 
         # 5. Build JSON format & UI Annotations
         k_list, u_list = [], []
@@ -759,10 +809,10 @@ def main():
     cap.release()
     cv2.destroyAllWindows()
     
-    # Cleanup Copilot analyzer
-    if copilot_analyzer:
-        copilot_analyzer.close()
-        logger.info("Copilot analyzer closed")
+    # Cleanup Gemini analyzer
+    if gemini_analyzer:
+        gemini_analyzer.close()
+        logger.info("Gemini analyzer closed")
     
     print("Stopped.")
 
