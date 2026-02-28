@@ -6,8 +6,9 @@ import {
   LayoutDashboard, Monitor, ClipboardList, Settings,
   Eye, UserCheck, AlertTriangle, Clock,
   Activity, Wifi, WifiOff, UserPlus,
-  Bell, Camera, Signal, Shield, BarChart2, Calendar, CloudUpload
+  Bell, Camera, Signal, Shield, BarChart2, Calendar, CloudUpload, Zap
 } from 'lucide-vue-next'
+import ActivityAnalyzer from './ActivityAnalyzer.vue'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface FaceCoords {
@@ -27,7 +28,7 @@ interface ApiPayload {
 }
 
 // ── Navigation state ──────────────────────────────────────────────────────────
-const currentPage = ref<'dashboard' | 'logs'>('dashboard')
+const currentPage = ref<'dashboard' | 'logs' | 'activity'>('dashboard')
 const activeTab   = ref<'live' | 'detected'>('live')
 const sidebarOpen = ref(true)
 
@@ -170,11 +171,11 @@ onUnmounted(() => {
         <li :class="{ active: currentPage === 'logs' }" @click="currentPage = 'logs'" title="Access Logs">
           <component :is="ClipboardList" :size="20" />
         </li>
+        <li :class="{ active: currentPage === 'activity' }" @click="currentPage = 'activity'" title="Copilot Activity Analysis">
+          <component :is="Zap" :size="20" />
+        </li>
         <li title="Signals">
           <component :is="Signal" :size="20" />
-        </li>
-        <li title="Activity">
-          <component :is="BarChart2" :size="20" />
         </li>
         <li title="Monitor">
           <component :is="Monitor" :size="20" />
@@ -196,7 +197,7 @@ onUnmounted(() => {
       <!-- Page header -->
       <header class="page-header">
         <div class="ph-left">
-          <h1>{{ currentPage === 'dashboard' ? 'Dashboard' : 'Access Logs' }}</h1>
+          <h1>{{ currentPage === 'dashboard' ? 'Dashboard' : currentPage === 'logs' ? 'Access Logs' : 'Copilot Activity Analysis' }}</h1>
           <p class="ph-sub">Welcome back, <strong>SecureView</strong></p>
         </div>
         <div class="ph-right">
@@ -429,6 +430,12 @@ onUnmounted(() => {
               <p class="empty-sub">Events appear here as the recognition system detects faces</p>
             </div>
           </div>
+        </div>
+      </template>
+
+      <template v-if="currentPage === 'activity'">
+        <div class="activity-view">
+          <ActivityAnalyzer />
         </div>
       </template>
 
@@ -1305,6 +1312,19 @@ tr:hover td { background: var(--surface-2); }
 .status-badge.authorized { background: rgba(34,197,94,0.1);  color: var(--green);  border-color: rgba(34,197,94,0.3); }
 .status-badge.pending    { background: rgba(245,158,11,0.1); color: var(--amber);  border-color: rgba(245,158,11,0.3); }
 .status-badge.denied     { background: rgba(220,38,38,0.1);  color: var(--accent); border-color: rgba(220,38,38,0.3); }
+
+/* ── Activity View ──────────────────────────────────────────────────────────── */
+.activity-view {
+  padding: 28px;
+  overflow-y: auto;
+  flex: 1;
+  animation: fade-in 0.3s ease-out;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
 
 /* ── SCROLLBARS ─────────────────────────────────────────────────────────────── */
 ::-webkit-scrollbar       { width: 5px; height: 5px; }

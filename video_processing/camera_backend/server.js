@@ -76,7 +76,33 @@ app.get('/health', (req, res) => {
   proxyJSON('/health', res, {
     status:     'offline',
     identities: 0,
+    copilot_enabled: false,
+    suspicious_activities: 0,
     _offline:   true,
+  })
+})
+
+// ── GET /suspicious-activities  — suspicious activities log ──────────────────
+app.get('/suspicious-activities', (req, res) => {
+  proxyJSON('/suspicious-activities', res, {
+    activities: [],
+    total_count: 0,
+    timestamp: Date.now() / 1000,
+    _offline: true,
+  })
+})
+
+// ── GET /activity-summary/:faceId  — activity summary for specific face ──────
+app.get('/activity-summary/:faceId', (req, res) => {
+  const faceId = req.params.faceId
+  proxyJSON(`/activity-summary/${faceId}`, res, {
+    face_id: faceId,
+    total_detections: 0,
+    suspicious_count: 0,
+    avg_suspicion: 0.0,
+    max_suspicion: 0.0,
+    risk_trend: 'UNKNOWN',
+    _offline: true,
   })
 })
 
@@ -124,19 +150,21 @@ app.get(/.*/, (req, res) => {
 // ── Start ─────────────────────────────────────────────────────────────────────
 app.listen(SERVER_PORT, () => {
   console.log('')
-  console.log('╔══════════════════════════════════════════════════════════╗')
-  console.log('║          SecureView — Surveillance Dashboard             ║')
-  console.log('╠══════════════════════════════════════════════════════════╣')
-  console.log(`║  Express server  → http://localhost:${SERVER_PORT}              ║`)
-  console.log(`║  Python backend  → http://localhost:${PYTHON_PORT} (required)   ║`)
-  console.log('╠══════════════════════════════════════════════════════════╣')
-  console.log('║  GET /          Vue app (from dist/ after npm run build) ║')
-  console.log('║  GET /live      Annotated MJPEG stream                   ║')
-  console.log('║  GET /data      JSON face + coordinate payload           ║')
-  console.log('║  GET /health    System health check                      ║')
-  console.log('╠══════════════════════════════════════════════════════════╣')
-  console.log('║  Dev mode:  npm run dev  (Vite on :5173, proxies to here)║')
-  console.log('╚══════════════════════════════════════════════════════════╝')
+  console.log('╔════════════════════════════════════════════════════════════════╗')
+  console.log('║          SecureView — Surveillance + Copilot Analysis         ║')
+  console.log('╠════════════════════════════════════════════════════════════════╣')
+  console.log(`║  Express server  → http://localhost:${SERVER_PORT}                   ║`)
+  console.log(`║  Python backend  → http://localhost:${PYTHON_PORT} (required)        ║`)
+  console.log('╠════════════════════════════════════════════════════════════════╣')
+  console.log('║  GET /               Vue app (from dist/ after npm run build) ║')
+  console.log('║  GET /live           Annotated MJPEG stream                    ║')
+  console.log('║  GET /data           JSON face + coordinate payload            ║')
+  console.log('║  GET /health         System health check                       ║')
+  console.log('║  GET /suspicious-activities  All suspicious activity logs     ║')
+  console.log('║  GET /activity-summary/:id   Activity summary for face ID     ║')
+  console.log('╠════════════════════════════════════════════════════════════════╣')
+  console.log('║  Dev mode:  npm run dev  (Vite on :5173, proxies to here)    ║')
+  console.log('╚════════════════════════════════════════════════════════════════╝')
   console.log('')
   console.log('  ⚠  Start multiple_tracking.py first!')
   console.log('')
