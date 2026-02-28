@@ -1,6 +1,7 @@
 <script setup lang="ts">
 /// <reference types="vite/client" />
 import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { useAuth0 } from '@auth0/auth0-vue';
 import {
   Menu, X,
   LayoutDashboard, Monitor, ClipboardList, Settings,
@@ -8,6 +9,8 @@ import {
   Activity, Wifi, WifiOff, UserPlus,
   Bell, Camera, Signal, Shield, BarChart2, Calendar, CloudUpload
 } from 'lucide-vue-next'
+
+const { loginWithRedirect, logout, isAuthenticated, user, isLoading } = useAuth0();
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface FaceCoords {
@@ -197,13 +200,27 @@ onUnmounted(() => {
       <header class="page-header">
         <div class="ph-left">
           <h1>{{ currentPage === 'dashboard' ? 'Dashboard' : 'Access Logs' }}</h1>
-          <p class="ph-sub">Welcome back, <strong>SecureView</strong></p>
+                    <p class="ph-sub">
+            <span v-if="isAuthenticated">Welcome back, <strong>{{ user.name }}</strong></span>
+            <span v-else>Welcome back, <strong>SecureView</strong></span>
+          </p>
         </div>
         <div class="ph-right">
           <button class="hdr-icon-btn" title="Notifications">
             <component :is="Bell" :size="18" />
           </button>
-          <button class="hdr-icon-btn" title="Users">
+          <div v-if="isLoading">
+            <button class="hdr-icon-btn" title="Loading...">
+              ...
+            </button>
+          </div>
+          <div v-else-if="isAuthenticated" style="display: flex; align-items: center; gap: 8px;">
+            <img :src="user.picture" :alt="user.name" style="width: 34px; height: 34px; border-radius: 7px;" />
+            <button @click="logout({ logoutParams: { returnTo: window.location.origin }})" class="hdr-icon-btn" title="Logout">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>
+            </button>
+          </div>
+          <button v-else @click="loginWithRedirect()" class="hdr-icon-btn" title="Login">
             <component :is="UserPlus" :size="18" />
           </button>
         </div>

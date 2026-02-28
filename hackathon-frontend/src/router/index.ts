@@ -10,6 +10,11 @@ const router = createRouter({
       path: '/',
       name: 'dashboard',
       component: Dashboard
+    },
+    {
+      path: '/callback',
+      name: 'callback',
+      component: Dashboard
     }
   ]
 })
