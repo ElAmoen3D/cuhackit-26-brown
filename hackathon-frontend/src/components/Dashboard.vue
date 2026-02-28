@@ -2,6 +2,7 @@
 import { ref } from 'vue'
 
 const activeTab = ref('live')
+const currentPage = ref('dashboard') // 'dashboard' or 'logs'
 
 const people = ref([
   { id: 1, name: 'Alice Johnson', status: 'Authorized', time: '10:42 AM' },
@@ -27,85 +28,109 @@ const detectedPeople = ref([
       </div>
       <nav>
         <ul>
-          <li class="active">Dashboard</li>
+          <li :class="{ active: currentPage === 'dashboard' }" @click="currentPage = 'dashboard'">Dashboard</li>
           <li>Live Feed</li>
-          <li>Database</li>
+          <li :class="{ active: currentPage === 'logs' }" @click="currentPage = 'logs'">Recent Access Logs</li>
           <li>Settings</li>
         </ul>
       </nav>
-
-      <!-- Recent Access Logs in Sidebar -->
-      <div class="sidebar-logs">
-        <h4>Recent Access Logs</h4>
-        <div class="logs-container">
-          <div v-for="person in people" :key="person.id" class="log-item">
-            <div class="log-name">{{ person.name }}</div>
-            <div class="log-status" :class="person.status.toLowerCase()">{{ person.status }}</div>
-            <div class="log-time">{{ person.time }}</div>
-          </div>
-        </div>
-      </div>
     </aside>
 
     <!-- Main Content -->
     <main class="main-content">
       <!-- Header -->
       <header class="top-bar">
-        <h1>Dashboard Overview</h1>
+        <h1>{{ currentPage === 'dashboard' ? 'Dashboard Overview' : 'Recent Access Logs' }}</h1>
         <button class="login-btn">Login</button>
       </header>
 
-      <!-- Tabs for Live Feed and Detected People -->
-      <div class="main-tabs">
-        <button 
-          :class="['main-tab-btn', { active: activeTab === 'live' }]" 
-          @click="activeTab = 'live'"
-        >
-          Live Feed
-        </button>
-        <button 
-          :class="['main-tab-btn', { active: activeTab === 'detected' }]" 
-          @click="activeTab = 'detected'"
-        >
-          Detected People
-        </button>
-      </div>
-
-      <!-- Dashboard Grid -->
-      <div class="dashboard-grid">
-        <!-- Live Feed Section -->
-        <div v-if="activeTab === 'live'" class="card camera-card full-width">
-          <div class="card-header">
-            <span class="live-indicator">● LIVE</span>
-          </div>
-          <div class="video-placeholder">
-            <div class="camera-overlay">
-              <p>Camera 01 - Main Entrance</p>
-            </div>
-            <!-- Placeholder for video stream -->
-            <div class="placeholder-content">
-              <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
-              <p>Video Feed Unavailable in Prototype</p>
-            </div>
-          </div>
+      <!-- Dashboard View -->
+      <template v-if="currentPage === 'dashboard'">
+        <!-- Tabs for Live Feed and Detected People -->
+        <div class="main-tabs">
+          <button 
+            :class="['main-tab-btn', { active: activeTab === 'live' }]" 
+            @click="activeTab = 'live'"
+          >
+            Live Feed
+          </button>
+          <button 
+            :class="['main-tab-btn', { active: activeTab === 'detected' }]" 
+            @click="activeTab = 'detected'"
+          >
+            Detected People
+          </button>
         </div>
 
-        <!-- Detected People Section -->
-        <div v-if="activeTab === 'detected'" class="card detected-card full-width">
-          <div class="card-header">
-            <h3>Detected People</h3>
-          </div>
-          <div class="detected-container">
-            <div v-for="person in detectedPeople" :key="person.id" class="detected-item">
-              <div class="person-info">
-                <span class="person-name">{{ person.name }}</span>
-                <span :class="['match-badge', person.type]">{{ person.type === 'known' ? 'Match: ' + person.match : 'Unknown' }}</span>
+        <!-- Dashboard Grid -->
+        <div class="dashboard-grid">
+          <!-- Live Feed Section -->
+          <div v-if="activeTab === 'live'" class="card camera-card full-width">
+            <div class="card-header">
+              <span class="live-indicator">● LIVE</span>
+            </div>
+            <div class="video-placeholder">
+              <div class="camera-overlay">
+                <p>Camera 01 - Main Entrance</p>
               </div>
-              <button v-if="person.type === 'unknown'" class="add-person-btn">Add Person</button>
+              <!-- Placeholder for video stream -->
+              <div class="placeholder-content">
+                <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 7l-7 5 7 5V7z"></path><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+                <p>Video Feed Unavailable in Prototype</p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Detected People Section -->
+          <div v-if="activeTab === 'detected'" class="card detected-card full-width">
+            <div class="card-header">
+              <h3>Detected People</h3>
+            </div>
+            <div class="detected-container">
+              <div v-for="person in detectedPeople" :key="person.id" class="detected-item">
+                <div class="person-info">
+                  <span class="person-name">{{ person.name }}</span>
+                  <span :class="['match-badge', person.type]">{{ person.type === 'known' ? 'Match: ' + person.match : 'Unknown' }}</span>
+                </div>
+                <button v-if="person.type === 'unknown'" class="add-person-btn">Add Person</button>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      </template>
+
+      <!-- Recent Access Logs View -->
+      <template v-if="currentPage === 'logs'">
+        <div class="logs-view">
+          <div class="card logs-card">
+            <div class="card-header">
+              <h3>All Access Logs</h3>
+            </div>
+            <div class="table-container">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Status</th>
+                    <th>Time</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="person in people" :key="person.id">
+                    <td>{{ person.name }}</td>
+                    <td>
+                      <span :class="['status-badge', person.status.toLowerCase()]">
+                        {{ person.status }}
+                      </span>
+                    </td>
+                    <td>{{ person.time }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </template>
     </main>
   </div>
 </template>
@@ -157,75 +182,6 @@ const detectedPeople = ref([
 .sidebar nav li:hover, .sidebar nav li.active {
   background-color: #059669;
   border-left: 4px solid var(--vt-c-green-light);
-}
-
-/* Sidebar Recent Access Logs */
-.sidebar-logs {
-  flex: 1;
-  padding: 20px;
-  border-top: 1px solid #059669;
-  overflow-y: auto;
-}
-
-.sidebar-logs h4 {
-  margin: 0 0 15px 0;
-  font-size: 0.95rem;
-  color: var(--vt-c-green-light);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.logs-container {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.log-item {
-  background: rgba(255, 255, 255, 0.1);
-  padding: 12px;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  border-left: 3px solid var(--vt-c-green-light);
-}
-
-.log-name {
-  font-weight: 600;
-  color: white;
-  margin-bottom: 4px;
-  text-overflow: ellipsis;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.log-status {
-  font-size: 0.75rem;
-  padding: 2px 6px;
-  border-radius: 3px;
-  display: inline-block;
-  margin-bottom: 4px;
-  background-color: rgba(255, 255, 255, 0.2);
-  color: white;
-}
-
-.log-status.authorized {
-  background-color: #86efac;
-  color: #065f46;
-}
-
-.log-status.pending {
-  background-color: #fbbf24;
-  color: #78350f;
-}
-
-.log-status.denied {
-  background-color: #f87171;
-  color: #7f1d1d;
-}
-
-.log-time {
-  font-size: 0.75rem;
-  color: rgba(255, 255, 255, 0.7);
 }
 
 /* Main Content */
@@ -441,6 +397,66 @@ const detectedPeople = ref([
   background-color: var(--vt-c-green);
 }
 
+/* Logs View */
+.logs-view {
+  padding: 30px;
+  overflow-y: auto;
+  height: 100%;
+}
+
+.logs-card {
+  width: 100%;
+}
+
+.table-container {
+  padding: 0;
+  overflow-x: auto;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+th {
+  background-color: #f9fafb;
+  padding: 12px 20px;
+  font-weight: 600;
+  font-size: 0.85rem;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+td {
+  padding: 15px 20px;
+  border-bottom: 1px solid #e5e7eb;
+  font-size: 0.95rem;
+}
+
+.status-badge {
+  padding: 4px 8px;
+  border-radius: 9999px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.status-badge.authorized {
+  background-color: #d1fae5;
+  color: #065f46;
+}
+
+.status-badge.pending {
+  background-color: #fbbf24;
+  color: #78350f;
+}
+
+.status-badge.denied {
+  background-color: #f87171;
+  color: #7f1d1d;
+}
+
 /* Responsive */
 @media (max-width: 1024px) {
   .dashboard-grid {
@@ -449,10 +465,6 @@ const detectedPeople = ref([
 
   .sidebar {
     width: 200px;
-  }
-
-  .sidebar-logs {
-    max-height: 300px;
   }
 }
 </style>
